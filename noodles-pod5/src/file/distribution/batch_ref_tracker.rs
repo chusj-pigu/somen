@@ -123,7 +123,7 @@ impl Capacity {
 
     /// Returns whether the capacity is exhausted.
     pub fn is_exhausted(&self) -> bool {
-        self.count() <= 0
+        self.count() == 0
     }
 }
 
@@ -137,7 +137,7 @@ impl Display for Capacity {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f,
                "IS_LOADED: {}, WAS_UNLOADED: {}, IS_LOCKED: {}, usage count: {}",
-               self.is_loaded(), self.was_unloaded(), self.is_loaded(), self.count()
+               self.is_loaded(), self.was_unloaded(), self.is_locked(), self.count()
         )
     }
 }

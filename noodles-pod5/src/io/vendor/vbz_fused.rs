@@ -31,19 +31,8 @@ use std::fmt::Display;
 
 /// Errors that can occur when decoding a StreamVByte-encoded byte slice.
 ///
-/// # Examples
-///
-/// ```
-/// # use svb::{u32::U32Classic, DecodeError};
-/// // Decoding from an empty buffer when n > 0 → ControlStreamTooShort.
-/// match U32Classic.decode(&[], 4) {
-///     Err(DecodeError::ControlStreamTooShort { need, have }) => {
-///         assert_eq!(need, 1);
-///         assert_eq!(have, 0);
-///     }
-///     _ => panic!("expected ControlStreamTooShort"),
-/// }
-/// ```
+/// An empty input with a nonzero sample count produces
+/// [`DecodeError::ControlStreamTooShort`].
 #[derive(Debug)]
 pub enum DecodeError {
     /// The data stream ended before all `n` values could be decoded.
@@ -101,17 +90,17 @@ pub fn decode_into(
     for i in 0..n {
         let bit = (ctrl[i / 8] >> (i % 8)) & 1;
         let raw = if bit == 0 {
-            if data_pos >= data.len() {
+            if data_pos >= data_bytes.len() {
                 return Err(DecodeError::DataTruncated { index: i });
             }
-            let v = data[data_pos] as u16;
+            let v = data_bytes[data_pos] as u16;
             data_pos += 1;
             v
         } else {
-            if data_pos + 2 > data.len() {
+            if data_pos + 2 > data_bytes.len() {
                 return Err(DecodeError::DataTruncated { index: i });
             }
-            let v = u16::from_le_bytes([data[data_pos], data[data_pos + 1]]);
+            let v = u16::from_le_bytes([data_bytes[data_pos], data_bytes[data_pos + 1]]);
             data_pos += 2;
             v
         };
@@ -152,13 +141,10 @@ pub fn encode(
         //
         // Positive values become 0, 2, 4, ...
         // Negative values become 1, 3, 5, ...
-        let raw = ((delta as u16) << 1)
-            ^ (0u16.wrapping_sub((delta >> 15) as u16));
+        let raw = ((delta as u16) << 1) ^ ((delta >> 15) as u16);
 
         if raw <= u8::MAX as u16 {
             // One-byte encoding.
-            out[i / 8] |= 1u8 << (i % 8);
-            // Wait: decoder says bit 0 means one byte, so leave bit clear.
             out.push(raw as u8);
         } else {
             // Two-byte encoding.
@@ -189,8 +175,30 @@ fn encode_decode_delta_boundaries() {
 
     let encoded = encode(&samples);
 
-    let mut decoded = vec![0i16; samples.len()];
+    let mut decoded = Vec::with_capacity(samples.len());
     decode_into(&encoded, samples.len(), &mut decoded).unwrap();
 
     assert_eq!(decoded, samples);
+}
+
+#[test]
+fn encode_decode_control_bytes_and_truncation() {
+    let samples = [0, 127, 255, -1, 0, 1, 2, 3, 4];
+    let encoded = encode(&samples);
+
+    // The third and fourth deltas take two bytes, and the ninth starts a new control byte.
+    assert_eq!(&encoded[..2], &[0b0000_1100, 0]);
+
+    let mut decoded = Vec::new();
+    decode_into(&encoded, samples.len(), &mut decoded).unwrap();
+    assert_eq!(decoded, samples);
+
+    assert!(matches!(
+        decode_into(&encoded[..1], samples.len(), &mut Vec::new()),
+        Err(DecodeError::ControlStreamTooShort { need: 2, have: 1 })
+    ));
+    assert!(matches!(
+        decode_into(&encoded[..encoded.len() - 1], samples.len(), &mut Vec::new()),
+        Err(DecodeError::DataTruncated { index: 8 })
+    ));
 }
