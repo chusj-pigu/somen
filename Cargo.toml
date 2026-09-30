@@ -13,7 +13,7 @@ members = [
   "noodles-gff",
   "noodles-gtf",
   "noodles-htsget",
-  "noodles-pod5",
+  "somen-pod5",
   "noodles-refget",
   "noodles-sam",
   "noodles-tabix",
