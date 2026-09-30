@@ -1,10 +1,11 @@
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader, Read, Seek};
 
 use noodles_bcf as bcf;
 use noodles_bgzf as bgzf;
+use noodles_core::Region;
 use noodles_vcf::{self as vcf, variant::io::Read as _};
 
-use crate::variant::Record;
+use crate::variant::{Index, Record};
 
 pub(super) enum Inner<R> {
     Bcf(bcf::io::Reader<bgzf::io::Reader<BufReader<R>>>),
@@ -28,7 +29,7 @@ where
 
     pub(super) fn read_record(&mut self, record: &mut Record) -> io::Result<usize> {
         match self {
-            Inner::Bcf(reader) => {
+            Self::Bcf(reader) => {
                 if !matches!(record, Record::Bcf(_)) {
                     *record = Record::Bcf(bcf::Record::default());
                 }
@@ -39,7 +40,7 @@ where
                     unreachable!();
                 }
             }
-            Inner::BcfRaw(reader) => {
+            Self::BcfRaw(reader) => {
                 if !matches!(record, Record::Bcf(_)) {
                     *record = Record::Bcf(bcf::Record::default());
                 }
@@ -50,7 +51,7 @@ where
                     unreachable!();
                 }
             }
-            Inner::Vcf(reader) => {
+            Self::Vcf(reader) => {
                 if !matches!(record, Record::Vcf(_)) {
                     *record = Record::Vcf(vcf::Record::default());
                 }
@@ -61,7 +62,7 @@ where
                     unreachable!();
                 }
             }
-            Inner::VcfGz(reader) => {
+            Self::VcfGz(reader) => {
                 if !matches!(record, Record::Vcf(_)) {
                     *record = Record::Vcf(vcf::Record::default());
                 }
@@ -80,10 +81,47 @@ where
         header: &'a vcf::Header,
     ) -> impl Iterator<Item = io::Result<Box<dyn vcf::variant::Record>>> + 'a {
         match self {
-            Inner::Bcf(reader) => reader.variant_records(header),
-            Inner::BcfRaw(reader) => reader.variant_records(header),
-            Inner::Vcf(reader) => reader.variant_records(header),
-            Inner::VcfGz(reader) => reader.variant_records(header),
+            Self::Bcf(reader) => reader.variant_records(header),
+            Self::BcfRaw(reader) => reader.variant_records(header),
+            Self::Vcf(reader) => reader.variant_records(header),
+            Self::VcfGz(reader) => reader.variant_records(header),
         }
+    }
+}
+
+impl<R> Inner<R>
+where
+    R: Read + Seek,
+{
+    pub(super) fn query<'r, 'h: 'r>(
+        &'r mut self,
+        header: &'h vcf::Header,
+        index: &Index,
+        region: &Region,
+    ) -> io::Result<impl Iterator<Item = io::Result<Box<dyn vcf::variant::Record>>> + 'r> {
+        let records: Box<dyn Iterator<Item = io::Result<_>>> = match (self, index) {
+            (Self::VcfGz(reader), Index::Vcf(idx)) => {
+                let query = reader.query(header, idx, region)?;
+
+                Box::new(query.records().map(|result| {
+                    result.map(|record| Box::new(record) as Box<dyn vcf::variant::Record>)
+                }))
+            }
+            (Self::Bcf(reader), Index::Bcf(idx)) => {
+                let query = reader.query(header, idx, region)?;
+
+                Box::new(query.records().map(|result| {
+                    result.map(|record| Box::new(record) as Box<dyn vcf::variant::Record>)
+                }))
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "format-index mismatch",
+                ));
+            }
+        };
+
+        Ok(records)
     }
 }

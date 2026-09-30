@@ -1,3 +1,4 @@
+mod format;
 mod reference_sequence_names;
 
 use std::{
@@ -6,11 +7,8 @@ use std::{
     num::{self, NonZero},
 };
 
-use self::reference_sequence_names::read_reference_sequence_names;
-use crate::binning_index::index::{
-    Header,
-    header::{Format, format},
-};
+use self::{format::read_format, reference_sequence_names::read_reference_sequence_names};
+use crate::binning_index::index::{Header, header::Format};
 
 /// An error returned when a CSI header fails to be read.
 #[derive(Debug)]
@@ -20,7 +18,7 @@ pub enum ReadError {
     /// The aux length is invalid.
     InvalidAuxLength(num::TryFromIntError),
     /// The header format is invalid.
-    InvalidFormat(format::TryFromIntError),
+    InvalidFormat(format::ReadError),
     /// The header reference sequence index is invalid.
     InvalidReferenceSequenceNameIndex(num::TryFromIntError),
     /// The header start position index is invalid.
@@ -99,8 +97,7 @@ pub fn read_header<R>(reader: &mut R) -> Result<Header, ReadError>
 where
     R: Read,
 {
-    let format =
-        read_i32_le(reader).and_then(|n| Format::try_from(n).map_err(ReadError::InvalidFormat))?;
+    let format = read_format(reader).map_err(ReadError::InvalidFormat)?;
 
     let reference_sequence_name_index = read_reference_sequence_name_index(reader)?;
     let start_position_index = read_start_position_index(reader)?;

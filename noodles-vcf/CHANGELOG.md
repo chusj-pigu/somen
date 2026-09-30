@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * vcf: Add index (`vcf::Index`) ([#433]).
+
+    This is an abstraction over building a tabix (TBI) and coordinate-sorted
+    index (CSI). Use `vcf::index::Indexer` to create a `vcf::Index`.
+
+  * vcf/fs: Add convenience function to read VCF indices
+    (`vcf::fs::read_associated_index`).
+
+    This attempts to read an associated TBI; otherwise, an associated CSI.
+
+  * vcf/variant/record_buf/convert: Add
+    `RecordBuf::try_clone_from_variant_record` to clone a
+    `vcf::alignment::Record` into an existing `RecordBuf`.
+
+  * vcf/variant/record_buf/alternate_bases: Implement `Extend<String>` and
+    `FromIterator<String>`.
+
+[#433]: https://github.com/zaeleus/noodles/discussions/433
+
+### Changed
+
+  * vcf: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * vcf/fs/index: Return `vcf::Index` from `index`.
+
+    `index` can return either a tabix (TBI) or coordinate-sorted index (CSI),
+    depending on the length of the longest reference sequence.
+
+  * vcf/record/samples/series/value/genotype: Return error on empty input.
+
+    Empty inputs now return `io::ErrorKind::UnexpectedEof`.
+
+## 0.93.0 - 2026-08-21
+
+### Changed
+
+  * vcf: Sync dependencies.
+
+## 0.92.0 - 2026-08-03
+
+### Changed
+
+  * vcf: Sync dependencies.
+
+## 0.91.0 - 2026-07-31
+
+### Added
+
+  * vcf/header/parser/record/value/map/format/number: Parse VCF 4.4 number for
+    ploidy (`P`).
+
+    See _The Variant Call Format Specification: VCFv4.4 and BCFv2.2_
+    (2025-11-05) § 1.4.4 "Individual format field format".
+
 ## 0.90.0 - 2026-07-24
 
 ### Changed

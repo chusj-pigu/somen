@@ -16,17 +16,16 @@ where
     reader.read_exact(&mut buf).await?;
 
     let l_nm = reader.read_i32_le().await?;
+    buf.extend(l_nm.to_le_bytes());
 
+    let filled = buf.len();
     let names_len =
         usize::try_from(l_nm).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut names = vec![0; names_len];
-    reader.read_exact(&mut names).await?;
 
-    buf.extend(l_nm.to_le_bytes());
-    buf.extend(names);
+    buf.resize(filled + names_len, 0);
+    reader.read_exact(&mut buf[filled..]).await?;
 
-    let mut buf_reader = &buf[..];
-    read_header(&mut buf_reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    read_header(&mut &buf[..]).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 #[cfg(test)]

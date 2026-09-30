@@ -6,7 +6,13 @@ use noodles_sam as sam;
 use tokio::io::{self, AsyncRead, AsyncSeek};
 
 use super::Reader;
-use crate::{crai, io::reader::Container};
+use crate::{
+    crai,
+    io::reader::{
+        Container,
+        query::{index_record_intersects, intersects},
+    },
+};
 
 /// An async reader over records of an async CRAM reader that intersects the given region.
 ///
@@ -53,13 +59,9 @@ where
         loop {
             match self.records.next() {
                 Some(r) => {
-                    if let (Some(start), Some(end)) = (r.alignment_start(), r.alignment_end()) {
-                        let alignment_interval = (start..=end).into();
-
-                        if self.interval.intersects(alignment_interval) {
-                            *record = r;
-                            return Ok(1);
-                        }
+                    if intersects(&r, self.reference_sequence_id, self.interval) {
+                        *record = r;
+                        return Ok(1);
                     }
                 }
                 None => match read_next_container(self).await {
@@ -93,7 +95,7 @@ where
 {
     let index_record = ctx.index.next()?;
 
-    if index_record.reference_sequence_id() != Some(ctx.reference_sequence_id) {
+    if !index_record_intersects(index_record, ctx.reference_sequence_id, ctx.interval) {
         return Some(Ok(()));
     }
 

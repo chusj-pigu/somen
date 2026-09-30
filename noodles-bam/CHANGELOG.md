@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * bam: Add index (`bam::Index`) ([#433]).
+
+    This is an abstraction over a BAM index (BAI) and coordinate-sorted index
+    (CSI). Use `bam::index::Indexer` to create a `bam::Index`.
+
+  * bam/fs: Add convenience function to read BAM indices
+    (`bam::fs::read_associated_index`).
+
+    This attempts to read an associated BAI; otherwise, an associated CSI.
+
+[#433]: https://github.com/zaeleus/noodles/discussions/433
+
+### Changed
+
+  * bam: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * bam/fs/index: Return `bam::Index` from `index`.
+
+    `index` can return either a BAM index (BAI) or coordinate-sorted index
+    (CSI), depending on the length of the longest reference sequence.
+
+  * bam/bai/io/writer/index: Validate min shift and depth.
+
+    These are now required to be the values assumed by BAI (14 and 5,
+    respectively).
+
+## 0.95.0 - 2026-08-21
+
+### Changed
+
+  * bam: Sync dependencies.
+
+## 0.94.0 - 2026-08-03
+
+### Changed
+
+  * bam: Sync dependencies.
+
+## 0.93.0 - 2026-07-31
+
+### Changed
+
+  * bam: Sync dependencies.
+
 ## 0.92.0 - 2026-07-24
 
 ### Changed

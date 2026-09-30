@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * util/alignment: Add index (`alignment::Index`).
+
+  * util/alignment/fs: Add convenience function to read associated indices
+    (`alignment::fs::read_associated_index`).
+
+  * util/alignment/io/reader: Add methods to query a given region
+    (`Reader::query`) and for unplaced, unmapped records
+    (`Reader::query_unmapped`).
+
+  * util/variant: Add index (`variant::Index`).
+
+  * util/variant/fs: Add convenience function to read associated indices
+    (`variant::fs::read_associated_index`).
+
+  * util/variant/io/reader: Add method to query a given region
+    (`Reader::query`).
+
+### Changed
+
+  * util: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+## 0.85.0 - 2026-08-21
+
+### Changed
+
+  * util: Sync dependencies.
+
+## 0.84.0 - 2026-08-03
+
+### Changed
+
+  * util: Sync dependencies.
+
+## 0.83.0 - 2026-07-31
+
+### Changed
+
+  * util: Sync dependencies.
+
 ## 0.82.0 - 2026-07-24
 
 ### Changed

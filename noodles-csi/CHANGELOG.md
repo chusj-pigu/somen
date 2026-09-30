@@ -1,5 +1,89 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * csi/binning_index/indexer: Add add record error
+    (`csi::binning_index::indexer::AddRecordError`).
+
+### Changed
+
+  * csi: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * csi/binning_index/index/reference_sequence/bin: Validate depth when
+    calculating max ID.
+
+    `Bin::max_id` and `Bin::metadata_id` now return `Option<usize>`.
+
+  * csi/binning_index/indexer: Validate min shift and depth on creation
+    (`Indexer::new`).
+
+  * csi/binning_index/indexer: Reject alignment context with start > end, end >
+    max supported position, and start < previous start position within the same
+    reference sequence.
+
+  * csi/io: Validate depth on read and write.
+
+    The maximum depth for CSI is 9.
+
+### Fixed
+
+  * csi/binning_index/index: Fix max position calculation to be 1-based.
+
+    This now allows querying with position 2^29.
+
+  * csi/binning_index/index/reference_sequence/bin: Fix max ID calculation.
+
+    This previously was equivalent to and used as the bin count.
+
+## 0.61.0 - 2026-08-21
+
+### Changed
+
+  * csi/binning_index/indexer: Optimize bins ([#406]).
+
+    Small bins are now merged into its parent on build. This is an optimization
+    for size, and previously built indices remain correct.
+
+  * csi/io/reader/index/header/format: Reject invalid coordinate system for
+    SAM and VCF formats.
+
+    These formats both inherently use the 1-based coordinate system.
+
+[#406]: https://github.com/zaeleus/noodles/pull/406
+
+### Fixed
+
+  * csi/binning_index/index/reference_sequence/index/linear_index: Use window
+    size based on min shift.
+
+    This previously only built a linear index for a min shift of 14.
+
+### Removed
+
+  * csi/binning_index/index/header/format: Remove conversions to and from `i32`
+    for `Format` and `CoordinateSystem`.
+
+    Deserialization and serialization is now the responsibility of the reader
+    and writer, respectively.
+
+## 0.60.0 - 2026-08-03
+
+### Changed
+
+  * csi: Sync dependencies.
+
+## 0.59.0 - 2026-07-31
+
+### Fixed
+
+  * csi/async/io/writer/index/reference_sequences: Write reference sequence
+    count.
+
+  * csi/async/io/writer/index/reference_sequences/bins: Find minimum record
+    start position.
+
 ## 0.58.0 - 2026-07-24
 
 ### Changed
@@ -296,7 +380,7 @@
 
     `Bin` no longer has a builder.
 
-  * csi/io/index_reader: Add type parameter for the index.
+  * csi/io/indexed_reader: Add type parameter for the index.
 
 ### Changed
 

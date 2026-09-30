@@ -1,13 +1,13 @@
 //! Binning index.
 
 pub mod index;
-mod indexer;
+pub mod indexer;
 mod reference_sequence;
 
 use std::io;
 
 use noodles_bgzf as bgzf;
-use noodles_core::region::Interval;
+use noodles_core::{Position, region::Interval};
 
 use self::index::{Header, reference_sequence::bin::Chunk};
 pub use self::{index::Index, indexer::Indexer, reference_sequence::ReferenceSequence};
@@ -164,6 +164,12 @@ pub fn optimize_chunks(chunks: &[Chunk], min_offset: bgzf::VirtualPosition) -> V
     merged_chunks
 }
 
+fn calculate_max_position(min_shift: u8, depth: u8) -> Option<Position> {
+    1usize
+        .checked_shl(u32::from(min_shift) + 3 * u32::from(depth))
+        .and_then(Position::new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +250,27 @@ mod tests {
         ];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_calculate_max_position() {
+        assert_eq!(
+            calculate_max_position(0, 1),
+            Some(const { Position::new(1 << 3).unwrap() })
+        );
+
+        #[cfg(not(target_pointer_width = "16"))]
+        assert_eq!(
+            calculate_max_position(14, 5),
+            Some(const { Position::new(1 << 29).unwrap() })
+        );
+
+        #[cfg(not(any(target_pointer_width = "16", target_pointer_width = "32")))]
+        assert_eq!(
+            calculate_max_position(14, 10),
+            Some(const { Position::new(1 << 44).unwrap() })
+        );
+
+        assert!(calculate_max_position(14, 17).is_none());
     }
 }

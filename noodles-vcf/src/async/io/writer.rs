@@ -167,9 +167,10 @@ where
         header: &Header,
         record: &dyn crate::variant::Record,
     ) -> io::Result<()> {
-        let mut writer = crate::io::Writer::new(Vec::new());
+        self.buf.clear();
+        let mut writer = crate::io::Writer::new(&mut self.buf);
         writer.write_variant_record(header, record)?;
-        self.inner.write_all(writer.get_ref()).await?;
+        self.inner.write_all(&self.buf).await?;
         Ok(())
     }
 }

@@ -319,6 +319,13 @@ impl crate::alignment::Record for Record {
         Box::new(self.quality_scores())
     }
 
+    fn quality_scores_ref(&self) -> crate::alignment::record::QualityScoresRef<'_> {
+        const OFFSET: u8 = b'!';
+
+        let src = self.0.quality_scores();
+        crate::alignment::record::QualityScoresRef::Offset(src, OFFSET)
+    }
+
     fn data(&self) -> Box<dyn crate::alignment::record::Data<'_> + '_> {
         Box::new(self.data())
     }

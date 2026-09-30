@@ -1,8 +1,9 @@
+mod format;
 mod reference_sequence_names;
 
 use std::io::{self, Write};
 
-use self::reference_sequence_names::write_reference_sequence_names;
+use self::{format::write_format, reference_sequence_names::write_reference_sequence_names};
 use crate::{
     binning_index::index::{Header, header::Format},
     io::writer::num::write_i32_le,
@@ -49,14 +50,6 @@ where
     write_reference_sequence_names(writer, header.reference_sequence_names())?;
 
     Ok(())
-}
-
-fn write_format<W>(writer: &mut W, format: Format) -> io::Result<()>
-where
-    W: Write,
-{
-    let n = i32::from(format);
-    write_i32_le(writer, n)
 }
 
 fn write_reference_sequence_name_index<W>(writer: &mut W, i: usize) -> io::Result<()>

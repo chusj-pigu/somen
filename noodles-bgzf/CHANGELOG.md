@@ -1,5 +1,81 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * bgzf/fs: Add convenience function to read associated gzip index
+    (`bgzf::fs::read_associated_index`).
+
+### Changed
+
+  * bgzf: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * bgzf/io/multithreaded_reader: Return frame reader error on read.
+
+    This error was previously only returned on finish.
+
+### Fixed
+
+  * bgzf/async/io/reader: Validate uncompressed position after seeking.
+
+    The uncompressed position cannot be > the block's data length.
+
+  * bgzf/async/io/reader: Reset stream on seek error.
+
+  * bgzf/async/io/reader/inflater: Force read completion before seek.
+
+    `tokio::io::BufReader::poll_complete` doesn't seem to call the underlying
+    reader's `poll_complete`, which can leave it busy, i.e., "other file
+    operation is pending, call poll_complete before start_seek".
+
+  * bgzf/io/multithreaded_reader: Validate uncompressed position after seeking.
+
+    The uncompressed position cannot be > the block's data length.
+
+  * bgzf/io/reader: Reset block on EOF ([#435]).
+
+    This prevents the last block from unintentionally being reused on
+    subsequent reads with buffers >= 64 KiB.
+
+  * bgzf/io/reader: Validate uncompressed position after seeking.
+
+    The uncompressed position cannot be > the block's data length.
+
+  * bgzf/io/writer: Track state to prevent writing duplicate EOF marker
+    ([#434]).
+
+[#434]: https://github.com/zaeleus/noodles/issues/434
+[#435]: https://github.com/zaeleus/noodles/issues/435
+
+## 0.51.0 - 2026-08-03
+
+### Fixed
+
+  * bgzf/io: Fix worker count selection ([#410]).
+
+    The worker count in `MultithreadedReader` and `MultithreadedWriter` are
+    synced to the number of managed buffers, and this previously used rayon's
+    global thread pool's thread count instead of the local pool. This also
+    unintentionally initialized rayon's global thread pool, even though it may
+    go unused.
+
+[#410]: https://github.com/zaeleus/noodles/issues/410
+
+## 0.50.0 - 2026-07-31
+
+### Changed
+
+  * bgzf/io: Use local thread pool for inflate/deflate tasks ([#409]).
+
+    `MultithreadedReader` and `MultithreadedWriter` no longer uses rayon's
+    default global thread pool for tasks. Each is created with its own
+    exclusive thread pool. This restores
+    `MultithreadedReader::with_worker_count` and
+    `MultithreadedWriter::with_worker_count` to set the number of workers.
+
+[#409]: https://github.com/zaeleus/noodles/issues/409
+
 ## 0.49.0 - 2026-07-24
 
 ### Fixed

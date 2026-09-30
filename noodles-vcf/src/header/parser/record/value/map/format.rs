@@ -77,7 +77,7 @@ impl fmt::Display for ParseError {
 
 pub fn parse_format(
     src: &mut &[u8],
-    _file_format: FileFormat,
+    file_format: FileFormat,
 ) -> Result<(String, Map<Format>), ParseError> {
     super::consume_prefix(src).map_err(|e| ParseError::new(None, ParseErrorKind::InvalidMap(e)))?;
 
@@ -94,7 +94,7 @@ pub fn parse_format(
     {
         match Tag::from(raw_key) {
             tag::ID => try_replace(&mut id, &None, tag::ID, raw_value.into())?,
-            tag::NUMBER => parse_number(&raw_value, &id)
+            tag::NUMBER => parse_number(&raw_value, file_format, &id)
                 .and_then(|v| try_replace(&mut number, &id, tag::NUMBER, v))?,
             tag::TYPE => {
                 parse_type(&raw_value, &id)
@@ -134,8 +134,12 @@ pub fn parse_format(
     ))
 }
 
-fn parse_number(s: &str, id: &Option<String>) -> Result<Number, ParseError> {
-    self::number::parse_number(s)
+fn parse_number(
+    s: &str,
+    file_format: FileFormat,
+    id: &Option<String>,
+) -> Result<Number, ParseError> {
+    self::number::parse_number(s, file_format)
         .map_err(|e| ParseError::new(id.clone(), ParseErrorKind::InvalidNumber(e)))
 }
 

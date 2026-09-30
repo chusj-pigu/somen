@@ -8,7 +8,7 @@ use crate::{Line, LineBuf, feature::RecordBuf, line::Kind};
 /// When using this, the caller is responsible to stop reading at either EOF or when the `FASTA`
 /// directive is read, whichever comes first.
 ///
-/// This is created by calling [`Reader::lines`].
+/// This is created by calling [`Reader::line_bufs`].
 pub struct LineBufs<'a, R> {
     inner: &'a mut Reader<R>,
     line: Line,
@@ -41,7 +41,11 @@ where
                     let directive = self.line.as_directive().unwrap();
                     Some(Ok(LineBuf::Directive(directive.into())))
                 }
-                Kind::Comment => Some(Ok(LineBuf::Comment(self.line.as_ref().into()))),
+                Kind::Comment => {
+                    // SAFETY: `self.line` is a comment.
+                    let comment = self.line.as_comment().unwrap();
+                    Some(Ok(LineBuf::Comment(comment.into())))
+                }
                 Kind::Record => Some(
                     self.line
                         .as_record()
@@ -53,5 +57,35 @@ where
             },
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bstr::BString;
+
+    use super::*;
+    use crate::{DirectiveBuf, directive_buf::Value};
+
+    #[test]
+    fn test_next() -> io::Result<()> {
+        let mut reader =
+            Reader::new(&b"##gff-version 3\n#noodles\n.\t.\t.\t1\t1\t.\t.\t.\t.\n"[..]);
+
+        let iter = LineBufs::new(&mut reader);
+        let actual: Vec<_> = iter.collect::<io::Result<_>>()?;
+
+        let expected = [
+            LineBuf::Directive(DirectiveBuf::new(
+                "gff-version",
+                Some(Value::String(BString::from("3"))),
+            )),
+            LineBuf::Comment(BString::from("noodles")),
+            LineBuf::Record(RecordBuf::default()),
+        ];
+
+        assert_eq!(actual, expected);
+
+        Ok(())
     }
 }

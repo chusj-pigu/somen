@@ -9,7 +9,7 @@ pub(crate) const METADATA_CHUNK_COUNT: u32 = 2;
 /// A binning index reference sequence bin.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bin {
-    chunks: Vec<Chunk>,
+    pub(super) chunks: Vec<Chunk>,
 }
 
 impl Bin {
@@ -19,10 +19,13 @@ impl Bin {
     ///
     /// ```
     /// use noodles_csi::binning_index::index::reference_sequence::Bin;
-    /// assert_eq!(Bin::max_id(5), 37449);
+    /// assert_eq!(Bin::max_id(5), Some(37448));
     /// ```
-    pub const fn max_id(depth: u8) -> usize {
-        bin_limit(depth) as usize
+    pub const fn max_id(depth: u8) -> Option<usize> {
+        match bin_count(depth) {
+            Some(n) => n.checked_sub(1),
+            None => None,
+        }
     }
 
     /// Calculates the metadata bin ID.
@@ -31,10 +34,15 @@ impl Bin {
     ///
     /// ```
     /// use noodles_csi::binning_index::index::reference_sequence::Bin;
-    /// assert_eq!(Bin::metadata_id(5), 37450);
+    /// assert_eq!(Bin::metadata_id(5), Some(37450));
     /// ```
-    pub const fn metadata_id(depth: u8) -> usize {
-        Self::max_id(depth) + 1
+    pub const fn metadata_id(depth: u8) -> Option<usize> {
+        // `CSIv1.pdf` (2020-07-21): "In CSI, the pseudo-bins have bin number `bin_limit([...]) +
+        // 1`".
+        match bin_count(depth) {
+            Some(n) => Some(n + 1),
+            None => None,
+        }
     }
 
     /// Creates a binning index reference sequence bin.
@@ -76,10 +84,12 @@ impl Bin {
     }
 }
 
-// `CSIv1.pdf` (2020-07-21)
-const fn bin_limit(depth: u8) -> i32 {
-    assert!(depth <= 10);
-    (1 << ((depth + 1) * 3)) / 7
+// `CSIv1.pdf` (2020-07-21): `int bin_limit`.
+const fn bin_count(depth: u8) -> Option<usize> {
+    match 1usize.checked_shl(3 * ((depth as u32) + 1)) {
+        Some(n) => Some(n / 7),
+        None => None,
+    }
 }
 
 #[cfg(test)]
@@ -136,5 +146,16 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    fn test_bin_count() {
+        assert_eq!(bin_count(0), Some(1));
+        assert_eq!(bin_count(1), Some(9));
+
+        #[cfg(not(target_pointer_width = "16"))]
+        assert_eq!(bin_count(5), Some(37449));
+
+        assert!(bin_count(u8::MAX).is_none());
     }
 }

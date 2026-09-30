@@ -86,7 +86,7 @@ where
         loop {
             match self.records.next() {
                 Some(r) => {
-                    if intersects(&r, self.interval) {
+                    if intersects(&r, self.reference_sequence_id, self.interval) {
                         *record = r;
                         return Ok(1);
                     }
@@ -129,7 +129,7 @@ where
     fn read_next_container(&mut self) -> Option<io::Result<()>> {
         let index_record = self.index.next()?;
 
-        if index_record.reference_sequence_id() != Some(self.reference_sequence_id) {
+        if !index_record_intersects(index_record, self.reference_sequence_id, self.interval) {
             return Some(Ok(()));
         }
 
@@ -194,12 +194,99 @@ where
     }
 }
 
-fn intersects(record: &sam::alignment::RecordBuf, region_interval: Interval) -> bool {
-    match (record.alignment_start(), record.alignment_end()) {
-        (Some(start), Some(end)) => {
-            let alignment_interval = (start..=end).into();
-            region_interval.intersects(alignment_interval)
+pub(crate) fn intersects(
+    record: &sam::alignment::RecordBuf,
+    reference_sequence_id: usize,
+    region_interval: Interval,
+) -> bool {
+    let Some(id) = record.reference_sequence_id() else {
+        return false;
+    };
+
+    if id != reference_sequence_id {
+        return false;
+    }
+
+    if interval_is_unbounded(region_interval) {
+        true
+    } else {
+        match (record.alignment_start(), record.alignment_end()) {
+            (Some(start), Some(end)) => {
+                let alignment_interval = (start..=end).into();
+                region_interval.intersects(alignment_interval)
+            }
+            _ => false,
         }
-        _ => false,
+    }
+}
+
+pub(crate) fn index_record_intersects(
+    record: &crai::Record,
+    reference_sequence_id: usize,
+    region_interval: Interval,
+) -> bool {
+    let Some(id) = record.reference_sequence_id() else {
+        return false;
+    };
+
+    if id != reference_sequence_id {
+        return false;
+    }
+
+    if interval_is_unbounded(region_interval) {
+        true
+    } else {
+        let Some(start) = record.alignment_start() else {
+            return false;
+        };
+
+        let span = record.alignment_span();
+
+        if span == 0 {
+            return false;
+        }
+
+        let end = start
+            .checked_add(span - 1)
+            .expect("attempt to add with overflow");
+
+        let alignment_interval = (start..=end).into();
+        region_interval.intersects(alignment_interval)
+    }
+}
+
+fn interval_is_unbounded(interval: Interval) -> bool {
+    interval.start().is_none() && interval.end().is_none()
+}
+
+#[cfg(test)]
+mod tests {
+    use noodles_core::Position;
+
+    use super::*;
+
+    #[test]
+    fn test_index_record_intersects() {
+        let start = const { Position::new(5).unwrap() };
+        let end = const { Position::new(13).unwrap() };
+        let interval = Interval::from(start..=end);
+
+        let record = crai::Record::new(Some(0), Position::new(8), 3, 0, 0, 0);
+        assert!(index_record_intersects(&record, 0, interval));
+
+        let record = crai::Record::new(Some(0), Position::new(8), 3, 0, 0, 0);
+        assert!(index_record_intersects(&record, 0, Interval::from(..)));
+
+        let record = crai::Record::new(None, None, 0, 0, 0, 0);
+        assert!(!index_record_intersects(&record, 0, interval));
+
+        let record = crai::Record::new(Some(1), None, 0, 0, 0, 0);
+        assert!(!index_record_intersects(&record, 0, interval));
+
+        let record = crai::Record::new(Some(0), None, 0, 0, 0, 0);
+        assert!(!index_record_intersects(&record, 0, interval));
+
+        let record = crai::Record::new(Some(0), None, 0, 0, 0, 0);
+        assert!(!index_record_intersects(&record, 0, interval));
     }
 }

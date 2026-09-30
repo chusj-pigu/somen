@@ -5,7 +5,7 @@ pub(crate) mod collections;
 pub(crate) mod container;
 pub mod header;
 pub(crate) mod num;
-mod query;
+pub(crate) mod query;
 mod records;
 
 use std::io::{self, Read, Seek, SeekFrom};

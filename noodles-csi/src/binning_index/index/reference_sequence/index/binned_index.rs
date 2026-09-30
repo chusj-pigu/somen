@@ -32,15 +32,22 @@ impl Index for BinnedIndex {
     }
 
     fn update(&mut self, min_shift: u8, depth: u8, start: Position, end: Position, chunk: Chunk) {
-        let bin_id = reg2bin(start, end, min_shift, depth);
+        let mut bin_id = reg2bin(start, end, min_shift, depth);
 
-        self.entry(bin_id)
-            .and_modify(|loffset| {
-                if chunk.start() < *loffset {
-                    *loffset = chunk.start();
-                }
-            })
-            .or_insert(chunk.start());
+        while bin_id > 0 {
+            self.entry(bin_id)
+                .and_modify(|loffset| {
+                    if chunk.start() < *loffset {
+                        *loffset = chunk.start();
+                    }
+                })
+                .or_insert(chunk.start());
+
+            bin_id = match parent_id(bin_id) {
+                Some(id) => id,
+                None => break,
+            };
+        }
     }
 }
 

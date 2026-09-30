@@ -6,7 +6,7 @@ mod metadata;
 
 pub use self::{bin::Bin, index::Index, metadata::Metadata};
 
-use std::{io, num::NonZero};
+use std::io;
 
 use bit_vec::BitVec;
 use indexmap::IndexMap;
@@ -92,8 +92,11 @@ where
     {
         let (start, end) = resolve_interval(min_shift, depth, interval)?;
 
-        let max_bin_id = Bin::max_id(depth);
-        let mut region_bins = BitVec::from_elem(max_bin_id, false);
+        let bin_count = Bin::max_id(depth)
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid depth"))?;
+
+        let mut region_bins = BitVec::from_elem(bin_count, false);
 
         reg2bins(start, end, min_shift, depth, &mut region_bins);
 
@@ -228,6 +231,107 @@ where
 
         metadata.update(is_mapped, chunk);
     }
+
+    pub(crate) fn optimize(mut self) -> Self {
+        const MIN_COMPRESSED_SIZE: u64 = 1 << 16;
+
+        let mut bins = IndexMap::with_capacity(self.bins.len());
+
+        let mut ids: Vec<_> = self.bins.keys().copied().collect();
+        ids.sort_unstable();
+
+        for id in ids.iter().rev() {
+            // SAFETY: The set of IDs is equivalent to the set of bin keys.
+            let bin = self.bins.swap_remove(id).unwrap();
+
+            let Some(pid) = parent_id(*id) else {
+                bins.insert(*id, bin);
+                continue;
+            };
+
+            let size = bin_compressed_span(&bin);
+
+            if size < MIN_COMPRESSED_SIZE
+                && let Some(parent_bin) = self.bins.get_mut(&pid)
+            {
+                parent_bin.chunks.extend(bin.chunks);
+            } else {
+                bins.insert(*id, bin);
+            }
+        }
+
+        for bin in bins.values_mut() {
+            bin.chunks = merge_chunks(bin.chunks());
+        }
+
+        Self::new(bins, self.index, self.metadata)
+    }
+}
+
+fn bin_compressed_span(bin: &Bin) -> u64 {
+    let chunks = bin.chunks();
+
+    let (first_chunk, last_chunk) = if chunks.is_empty() {
+        return 0;
+    } else if chunks.len() == 1 {
+        let chunk = chunks[0];
+        (chunk, chunk)
+    } else {
+        chunks_minmax(chunks)
+    };
+
+    let start = first_chunk.start().compressed();
+    let end = last_chunk.end().compressed();
+
+    end - start
+}
+
+fn chunks_minmax(chunks: &[Chunk]) -> (Chunk, Chunk) {
+    let chunk = &chunks[0];
+    let (mut min, mut max) = (chunk, chunk);
+
+    for chunk in chunks.iter().skip(1) {
+        if chunk.start() < min.start() {
+            min = chunk;
+        }
+
+        if chunk.start() > max.start() {
+            max = chunk;
+        }
+    }
+
+    (*min, *max)
+}
+
+fn merge_chunks(chunks: &[Chunk]) -> Vec<Chunk> {
+    let mut chunks = chunks.to_vec();
+
+    if chunks.is_empty() {
+        return chunks;
+    }
+
+    chunks.sort_unstable_by_key(|c| c.start());
+
+    // At worst, no chunks are merged, and the resulting list will be the same size as the input.
+    let mut merged_chunks = Vec::with_capacity(chunks.len());
+
+    // `chunks` is guaranteed to be non-empty.
+    let mut current_chunk = chunks[0];
+
+    for next_chunk in chunks.iter().skip(1) {
+        if current_chunk.end().compressed() >= next_chunk.start().compressed() {
+            if current_chunk.end() < next_chunk.end() {
+                current_chunk = Chunk::new(current_chunk.start(), next_chunk.end());
+            }
+        } else {
+            merged_chunks.push(current_chunk);
+            current_chunk = *next_chunk;
+        }
+    }
+
+    merged_chunks.push(current_chunk);
+
+    merged_chunks
 }
 
 impl<I> binning_index::ReferenceSequence for ReferenceSequence<I>
@@ -239,10 +343,10 @@ where
     }
 }
 
-const M: usize = NonZero::new(8).unwrap().get();
+const M: usize = 8;
 
 // parent of i = floor((i - 1) / M)
-pub(crate) fn parent_id(id: usize) -> Option<usize> {
+fn parent_id(id: usize) -> Option<usize> {
     if id > 0 { Some((id - 1) / M) } else { None }
 }
 
@@ -305,40 +409,117 @@ mod tests {
 
     #[cfg(not(target_pointer_width = "16"))]
     #[test]
-    fn test_query() -> Result<(), noodles_core::position::TryFromIntError> {
+    fn test_query() {
         let reference_sequence = ReferenceSequence::new(Default::default(), Vec::new(), None);
-        let end = usize::try_from(i32::MAX).and_then(Position::try_from)?;
+        let end = const { Position::new(i32::MAX as usize).unwrap() };
 
         assert!(matches!(
             reference_sequence.query(MIN_SHIFT, DEPTH, ..=end),
             Err(e) if e.kind() == io::ErrorKind::InvalidInput,
         ));
-
-        Ok(())
     }
 
     #[test]
-    fn test_reg2bin() -> Result<(), noodles_core::position::TryFromIntError> {
+    fn test_optimize() {
+        let bins = [
+            (0, vec![((0, 0), (16384, 0))]),
+            (1, vec![((0, 0), (32768, 0))]),
+            (2, vec![((0, 0), (131072, 0))]),
+            (9, vec![((0, 0), (16384, 0))]),
+            (10, vec![((0, 0), (131072, 0))]),
+        ]
+        .into_iter()
+        .map(|(id, raw_chunks)| {
+            let chunks = raw_chunks
+                .into_iter()
+                .map(|((a, b), (c, d))| {
+                    Chunk::new(
+                        bgzf::VirtualPosition::new(a, b).unwrap(),
+                        bgzf::VirtualPosition::new(c, d).unwrap(),
+                    )
+                })
+                .collect();
+
+            (id, Bin::new(chunks))
+        })
+        .collect();
+
+        let reference_sequence = ReferenceSequence::new(bins, Vec::new(), None);
+        let actual = reference_sequence.optimize();
+
+        let expected_bins: IndexMap<_, _> = [
+            (
+                10,
+                Bin::new(vec![Chunk::new(
+                    const { bgzf::VirtualPosition::new(0, 0).unwrap() },
+                    const { bgzf::VirtualPosition::new(131072, 0).unwrap() },
+                )]),
+            ),
+            (
+                2,
+                Bin::new(vec![Chunk::new(
+                    const { bgzf::VirtualPosition::new(0, 0).unwrap() },
+                    const { bgzf::VirtualPosition::new(131072, 0).unwrap() },
+                )]),
+            ),
+            (
+                0,
+                Bin::new(vec![Chunk::new(
+                    const { bgzf::VirtualPosition::new(0, 0).unwrap() },
+                    const { bgzf::VirtualPosition::new(32768, 0).unwrap() },
+                )]),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(actual.bins, expected_bins);
+    }
+
+    #[test]
+    fn test_chunks_minmax() {
+        let min_chunk = Chunk::new(
+            const { bgzf::VirtualPosition::new(5, 0).unwrap() },
+            const { bgzf::VirtualPosition::new(8, 0).unwrap() },
+        );
+
+        let max_chunk = Chunk::new(
+            const { bgzf::VirtualPosition::new(21, 0).unwrap() },
+            const { bgzf::VirtualPosition::new(34, 0).unwrap() },
+        );
+
+        let chunks = [
+            max_chunk,
+            min_chunk,
+            Chunk::new(
+                const { bgzf::VirtualPosition::new(13, 0).unwrap() },
+                const { bgzf::VirtualPosition::new(21, 0).unwrap() },
+            ),
+        ];
+
+        assert_eq!(chunks_minmax(&chunks), (min_chunk, max_chunk));
+    }
+
+    #[test]
+    fn test_reg2bin() {
         const MIN_SHIFT: u8 = 4;
         const DEPTH: u8 = 2;
 
-        let start = Position::try_from(8)?;
+        let start = const { Position::new(8).unwrap() };
         let end = start;
         assert_eq!(reg2bin(start, end, MIN_SHIFT, DEPTH), 9);
 
-        let end = Position::try_from(13)?;
+        let end = const { Position::new(13).unwrap() };
         assert_eq!(reg2bin(start, end, MIN_SHIFT, DEPTH), 9);
 
-        let end = Position::try_from(16)?;
+        let end = const { Position::new(16).unwrap() };
         assert_eq!(reg2bin(start, end, MIN_SHIFT, DEPTH), 9);
 
-        let end = Position::try_from(17)?;
+        let end = const { Position::new(17).unwrap() };
         assert_eq!(reg2bin(start, end, MIN_SHIFT, DEPTH), 1);
 
-        let end = Position::try_from(143)?;
+        let end = const { Position::new(143).unwrap() };
         assert_eq!(reg2bin(start, end, MIN_SHIFT, DEPTH), 0);
-
-        Ok(())
     }
 
     #[test]
@@ -358,12 +539,12 @@ mod tests {
         const DEPTH: u8 = 2;
 
         fn t(start: Position, end: Position, expected_bin_ids: &[usize]) {
-            let max_bin_id = Bin::max_id(DEPTH);
+            let bin_count = Bin::max_id(DEPTH).and_then(|n| n.checked_add(1)).unwrap();
 
-            let mut actual = BitVec::from_elem(max_bin_id, false);
+            let mut actual = BitVec::from_elem(bin_count, false);
             reg2bins(start, end, MIN_SHIFT, DEPTH, &mut actual);
 
-            let mut expected = BitVec::from_elem(max_bin_id, false);
+            let mut expected = BitVec::from_elem(bin_count, false);
 
             for &bin_id in expected_bin_ids {
                 expected.set(bin_id, true);
@@ -372,18 +553,27 @@ mod tests {
             assert_eq!(actual, expected);
         }
 
-        t(Position::try_from(1)?, Position::try_from(16)?, &[0, 1, 9]);
-        t(Position::try_from(9)?, Position::try_from(13)?, &[0, 1, 9]);
+        t(
+            const { Position::new(1).unwrap() },
+            const { Position::new(16).unwrap() },
+            &[0, 1, 9],
+        );
 
         t(
-            Position::try_from(36)?,
-            Position::try_from(67)?,
+            const { Position::new(9).unwrap() },
+            const { Position::new(13).unwrap() },
+            &[0, 1, 9],
+        );
+
+        t(
+            const { Position::new(36).unwrap() },
+            const { Position::new(67).unwrap() },
             &[0, 1, 11, 12, 13],
         );
 
         t(
-            Position::try_from(49)?,
-            Position::try_from(143)?,
+            const { Position::new(49).unwrap() },
+            const { Position::new(143).unwrap() },
             &[0, 1, 2, 12, 13, 14, 15, 16, 17],
         );
 

@@ -62,16 +62,12 @@ impl TryFrom<u8> for Modification {
     type Error = ParseError;
 
     fn try_from(b: u8) -> Result<Self, Self::Error> {
-        if b.is_ascii_lowercase() || is_ambiguity_code(b) {
+        if b.is_ascii_alphabetic() {
             Ok(Self::Code(b))
         } else {
             Err(ParseError::Invalid)
         }
     }
-}
-
-fn is_ambiguity_code(b: u8) -> bool {
-    matches!(b, b'C' | b'T' | b'U' | b'A' | b'G' | b'N')
 }
 
 #[cfg(test)]
@@ -106,6 +102,7 @@ mod tests {
         t(b'n', XANTHOSINE);
         t(b'N', Modification::Code(b'N'));
 
+        t(b'Z', Modification::Code(b'Z'));
         t(b'z', Modification::Code(b'z'));
 
         assert_eq!(Modification::try_from(b'?'), Err(ParseError::Invalid));

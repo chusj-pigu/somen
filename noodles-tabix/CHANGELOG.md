@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+  * tabix: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * tabix/io/writer/index: Validate min shift and depth.
+
+    These are now required to be the values assumed by tabix (14 and 5,
+    respectively).
+
+## 0.67.0 - 2026-08-21
+
+### Changed
+
+  * tabix: Sync dependencies.
+
+## 0.66.0 - 2026-08-03
+
+### Changed
+
+  * tabix: Sync dependencies.
+
+## 0.65.0 - 2026-07-31
+
+### Changed
+
+  * tabix: Sync dependencies.
+
 ## 0.64.0 - 2026-07-24
 
 ### Changed

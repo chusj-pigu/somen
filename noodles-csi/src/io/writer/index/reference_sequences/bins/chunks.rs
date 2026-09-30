@@ -9,15 +9,23 @@ pub(super) fn write_chunks<W>(writer: &mut W, chunks: &[Chunk]) -> io::Result<()
 where
     W: Write,
 {
-    let n_chunk =
-        i32::try_from(chunks.len()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    write_i32_le(writer, n_chunk)?;
+    write_chunk_count(writer, chunks.len())?;
 
     for chunk in chunks {
         write_chunk(writer, chunk)?;
     }
 
     Ok(())
+}
+
+fn write_chunk_count<W>(writer: &mut W, chunk_count: usize) -> io::Result<()>
+where
+    W: Write,
+{
+    let n =
+        i32::try_from(chunk_count).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    write_i32_le(writer, n)
 }
 
 fn write_chunk<W>(writer: &mut W, chunk: &Chunk) -> io::Result<()>

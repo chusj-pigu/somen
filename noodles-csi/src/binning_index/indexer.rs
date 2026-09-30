@@ -1,11 +1,17 @@
-use std::io;
+//! Binning index indexer.
+
+mod add_record_error;
 
 use indexmap::IndexMap;
 use noodles_core::Position;
 
-use super::index::{
-    Header, Index, ReferenceSequence,
-    reference_sequence::{self, bin::Chunk},
+pub use self::add_record_error::AddRecordError;
+use super::{
+    calculate_max_position,
+    index::{
+        Header, Index, ReferenceSequence,
+        reference_sequence::{self, bin::Chunk},
+    },
 };
 
 /// A binning index indexer.
@@ -16,6 +22,8 @@ pub struct Indexer<I> {
     header: Option<Header>,
     reference_sequences: Vec<ReferenceSequence<I>>,
     unplaced_unmapped_record_count: u64,
+    prev_start_position: Position,
+    max_position: Position,
 }
 
 impl<I> Indexer<I>
@@ -28,16 +36,21 @@ where
     ///
     /// ```
     /// use noodles_csi::binning_index::{index::reference_sequence::index::BinnedIndex, Indexer};
-    /// let indexer = Indexer::<BinnedIndex>::new(14, 5);
+    ///
+    /// let indexer = Indexer::<BinnedIndex>::new(14, 5).expect("invalid min shift and/or depth");
     /// ```
-    pub fn new(min_shift: u8, depth: u8) -> Self {
-        Self {
+    pub fn new(min_shift: u8, depth: u8) -> Option<Self> {
+        let max_position = calculate_max_position(min_shift, depth)?;
+
+        Some(Self {
             min_shift,
             depth,
             header: None,
             reference_sequences: Vec::new(),
             unplaced_unmapped_record_count: 0,
-        }
+            prev_start_position: Position::MIN,
+            max_position,
+        })
     }
 
     /// Sets a tabix header.
@@ -51,7 +64,7 @@ where
     /// };
     ///
     /// let header = Header::default();
-    /// let indexer = Indexer::<BinnedIndex>::new(14, 5).set_header(header);
+    /// let indexer = Indexer::<BinnedIndex>::default().set_header(header);
     /// ```
     pub fn set_header(mut self, header: Header) -> Self {
         self.header = Some(header);
@@ -70,7 +83,7 @@ where
     ///     Indexer,
     /// };
     ///
-    /// let mut indexer = Indexer::<BinnedIndex>::new(14, 5);
+    /// let mut indexer = Indexer::<BinnedIndex>::default();
     ///
     /// let reference_sequence_id = 0;
     /// let start = Position::try_from(8)?;
@@ -88,13 +101,24 @@ where
         &mut self,
         alignment_context: Option<(usize, Position, Position, bool)>,
         chunk: Chunk,
-    ) -> io::Result<()> {
+    ) -> Result<(), AddRecordError> {
         use std::cmp::Ordering;
 
         let Some((reference_sequence_id, start, end, is_mapped)) = alignment_context else {
             self.unplaced_unmapped_record_count += 1;
             return Ok(());
         };
+
+        if start > end {
+            return Err(AddRecordError::InvalidInterval { start, end });
+        }
+
+        if end > self.max_position {
+            return Err(AddRecordError::EndExceedsMaxPosition {
+                end,
+                max_position: self.max_position,
+            });
+        }
 
         if self.reference_sequences.is_empty() {
             self.add_reference_sequences_until(0);
@@ -105,14 +129,26 @@ where
 
         match reference_sequence_id.cmp(&current_reference_sequence_id) {
             Ordering::Less => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid reference sequence ID",
-                ));
+                return Err(AddRecordError::OutOfOrderReferenceSequenceId {
+                    reference_sequence_id,
+                    current_reference_sequence_id,
+                });
             }
             Ordering::Equal => {}
-            Ordering::Greater => self.add_reference_sequences_until(reference_sequence_id),
+            Ordering::Greater => {
+                self.prev_start_position = Position::MIN;
+                self.add_reference_sequences_until(reference_sequence_id)
+            }
         }
+
+        if start < self.prev_start_position {
+            return Err(AddRecordError::OutOfOrderStartPosition {
+                start,
+                prev_start_position: self.prev_start_position,
+            });
+        }
+
+        self.prev_start_position = start;
 
         let reference_sequence = &mut self.reference_sequences[reference_sequence_id];
         reference_sequence.update(self.min_shift, self.depth, start, end, is_mapped, chunk);
@@ -126,7 +162,7 @@ where
     ///
     /// ```
     /// use noodles_csi::binning_index::{index::reference_sequence::index::BinnedIndex, Indexer};
-    /// let indexer = Indexer::<BinnedIndex>::new(14, 5);
+    /// let indexer = Indexer::<BinnedIndex>::default();
     /// let index = indexer.build(0);
     /// ```
     pub fn build(mut self, reference_sequence_count: usize) -> Index<I> {
@@ -135,10 +171,16 @@ where
             self.add_reference_sequences_until(reference_sequence_count - 1);
         }
 
+        let reference_sequences = self
+            .reference_sequences
+            .into_iter()
+            .map(|reference_sequence| reference_sequence.optimize())
+            .collect();
+
         let mut builder = Index::builder()
             .set_min_shift(self.min_shift)
             .set_depth(self.depth)
-            .set_reference_sequences(self.reference_sequences)
+            .set_reference_sequences(reference_sequences)
             .set_unplaced_unmapped_record_count(self.unplaced_unmapped_record_count);
 
         if let Some(header) = self.header {
@@ -168,6 +210,8 @@ where
             header: None,
             reference_sequences: Vec::new(),
             unplaced_unmapped_record_count: 0,
+            prev_start_position: Position::MIN,
+            max_position: const { Position::new(1 << 29).unwrap() },
         }
     }
 }
@@ -188,6 +232,122 @@ mod tests {
         assert!(indexer.header.is_none());
         assert!(indexer.reference_sequences.is_empty());
         assert_eq!(indexer.unplaced_unmapped_record_count, 0);
+        assert_eq!(indexer.prev_start_position, Position::MIN);
+        assert_eq!(
+            indexer.max_position,
+            const { Position::new(1 << 29).unwrap() }
+        );
+    }
+
+    #[test]
+    fn test_add_record_with_invalid_interval() {
+        let mut indexer = Indexer::<LinearIndex>::default();
+
+        let start = const { Position::new(13).unwrap() };
+        let end = const { Position::new(8).unwrap() };
+        let alignment_context = Some((0, start, end, true));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(8),
+            bgzf::VirtualPosition::from(13),
+        );
+
+        assert_eq!(
+            indexer.add_record(alignment_context, chunk),
+            Err(AddRecordError::InvalidInterval { start, end })
+        );
+    }
+
+    #[test]
+    fn test_add_record_with_end_exceeds_max_position() {
+        let mut indexer = Indexer::<LinearIndex>::new(1, 1).unwrap(); // max position = 16
+
+        let alignment_context = Some((0, Position::MIN, Position::MAX, true));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(8),
+            bgzf::VirtualPosition::from(13),
+        );
+
+        assert_eq!(
+            indexer.add_record(alignment_context, chunk),
+            Err(AddRecordError::EndExceedsMaxPosition {
+                end: Position::MAX,
+                max_position: const { Position::new(16).unwrap() }
+            })
+        );
+    }
+
+    #[test]
+    fn test_add_record_with_out_of_order_reference_sequence_id() -> Result<(), AddRecordError> {
+        let mut indexer = Indexer::<LinearIndex>::default();
+
+        let start = const { Position::new(8).unwrap() };
+        let end = const { Position::new(13).unwrap() };
+
+        let alignment_context = Some((1, start, end, true));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(0),
+            bgzf::VirtualPosition::from(1),
+        );
+        indexer.add_record(alignment_context, chunk)?;
+
+        let alignment_context = Some((0, start, end, true));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(1),
+            bgzf::VirtualPosition::from(2),
+        );
+        assert_eq!(
+            indexer.add_record(alignment_context, chunk),
+            Err(AddRecordError::OutOfOrderReferenceSequenceId {
+                reference_sequence_id: 0,
+                current_reference_sequence_id: 1
+            })
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_add_record_with_out_of_order_start_position() -> Result<(), AddRecordError> {
+        let mut indexer = Indexer::<LinearIndex>::default();
+
+        let alignment_context = Some((
+            0,
+            const { Position::new(5).unwrap() },
+            const { Position::new(8).unwrap() },
+            true,
+        ));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(0),
+            bgzf::VirtualPosition::from(1),
+        );
+        indexer.add_record(alignment_context, chunk)?;
+
+        let alignment_context = Some((
+            1,
+            const { Position::new(3).unwrap() },
+            const { Position::new(8).unwrap() },
+            true,
+        ));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(1),
+            bgzf::VirtualPosition::from(2),
+        );
+        indexer.add_record(alignment_context, chunk)?;
+
+        let alignment_context = Some((1, Position::MIN, const { Position::new(5).unwrap() }, true));
+        let chunk = Chunk::new(
+            bgzf::VirtualPosition::from(2),
+            bgzf::VirtualPosition::from(3),
+        );
+        assert_eq!(
+            indexer.add_record(alignment_context, chunk),
+            Err(AddRecordError::OutOfOrderStartPosition {
+                start: Position::MIN,
+                prev_start_position: const { Position::new(3).unwrap() }
+            })
+        );
+
+        Ok(())
     }
 
     #[test]
@@ -294,10 +454,12 @@ mod tests {
 
     #[test]
     fn test_build_with_nonstandard_bin_factors() {
-        const MIN_SHIFT: u8 = 13;
-        const DEPTH: u8 = 8;
+        const MIN_SHIFT: u8 = 4;
+        const DEPTH: u8 = 2;
 
-        let actual = Indexer::<LinearIndex>::new(MIN_SHIFT, DEPTH).build(0);
+        let actual = Indexer::<LinearIndex>::new(MIN_SHIFT, DEPTH)
+            .unwrap()
+            .build(0);
 
         let expected = Index::builder()
             .set_min_shift(MIN_SHIFT)

@@ -1,0 +1,235 @@
+//! VCF indexer builder.
+
+use std::{error, fmt};
+
+use noodles_core::Position;
+use noodles_csi::{self as csi, binning_index::index::header::ReferenceSequenceNames};
+
+use super::{Indexer, Inner};
+use crate::index::Format;
+
+const TABIX_MIN_SHIFT: u8 = 14;
+const TABIX_DEPTH: u8 = 5;
+
+/// An error returned when a VCF indexer fails to build.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BuildError {
+    /// The estimated max position is unsupported.
+    ///
+    /// No format is able to support the given estimated max position.
+    UnsupportedMaxPosition,
+    /// The format is invalid.
+    ///
+    /// The estimated max position cannot fit in the given format.
+    InvalidFormat,
+    /// The indexer input is invalid.
+    InvalidIndexerInput,
+}
+
+impl error::Error for BuildError {}
+
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedMaxPosition => write!(f, "unsupported max position"),
+            Self::InvalidFormat => write!(f, "invalid format"),
+            Self::InvalidIndexerInput => write!(f, "invalid indexer input"),
+        }
+    }
+}
+
+/// A VCF indexer builder.
+#[derive(Default)]
+pub struct Builder {
+    format: Option<Format>,
+    max_position_hint: Option<Position>,
+}
+
+impl Builder {
+    /// Sets the VCF index format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noodles_vcf::index::{Format, Indexer};
+    /// let builder = Indexer::builder().set_format(Format::Tabix);
+    /// ```
+    pub fn set_format(mut self, format: Format) -> Self {
+        self.format = Some(format);
+        self
+    }
+
+    /// Sets a max position hint.
+    ///
+    /// This sets the maximum expected position that is used for indexing. When <= 2<sup>29</sup>,
+    /// this will select tabix (TBI); otherwise, a coordinate-sorted index (CSI) is used.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noodles_core::Position;
+    /// use noodles_vcf::index::Indexer;
+    ///
+    /// let builder = Indexer::builder().set_max_position_hint(Position::MIN);
+    /// ```
+    pub fn set_max_position_hint(mut self, max_position_hint: Position) -> Self {
+        self.max_position_hint = Some(max_position_hint);
+        self
+    }
+
+    /// Builds a VCF indexer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noodles_vcf::index::Indexer;
+    /// let indexer = Indexer::builder().build()?;
+    /// # Ok::<_, noodles_vcf::index::indexer::builder::BuildError>(())
+    /// ```
+    pub fn build(self) -> Result<Indexer, BuildError> {
+        let (min_shift, depth) = if let Some(n) = self.max_position_hint {
+            fit_min_shift_and_depth(n).ok_or(BuildError::UnsupportedMaxPosition)?
+        } else {
+            (TABIX_MIN_SHIFT, TABIX_DEPTH)
+        };
+
+        let format = if min_shift == TABIX_MIN_SHIFT && depth == TABIX_DEPTH {
+            self.format.unwrap_or_default()
+        } else if let Some(Format::Tabix) = self.format {
+            return Err(BuildError::InvalidFormat);
+        } else {
+            Format::Csi
+        };
+
+        let inner = match format {
+            Format::Csi => csi::binning_index::Indexer::new(min_shift, depth)
+                .map(Inner::Csi)
+                .ok_or(BuildError::InvalidIndexerInput)?,
+            Format::Tabix => Inner::Tabix(csi::binning_index::Indexer::default()),
+        };
+
+        Ok(Indexer {
+            header: csi::binning_index::index::header::Builder::vcf().build(),
+            reference_sequence_names: ReferenceSequenceNames::default(),
+            inner,
+        })
+    }
+}
+
+fn fit_min_shift_and_depth(max_position: Position) -> Option<(u8, u8)> {
+    const MAX_DEPTH: u8 = 9;
+
+    for depth in TABIX_DEPTH..=MAX_DEPTH {
+        let max_index_position = calculate_max_position(TABIX_MIN_SHIFT, depth)?;
+
+        if max_position <= max_index_position {
+            return Some((TABIX_MIN_SHIFT, depth));
+        }
+    }
+
+    for min_shift in (TABIX_MIN_SHIFT + 1).. {
+        let max_index_position = calculate_max_position(min_shift, MAX_DEPTH)?;
+
+        if max_position <= max_index_position {
+            return Some((min_shift, MAX_DEPTH));
+        }
+    }
+
+    None
+}
+
+fn calculate_max_position(min_shift: u8, depth: u8) -> Option<Position> {
+    1usize
+        .checked_shl(u32::from(min_shift) + 3 * u32::from(depth))
+        .and_then(Position::new)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build() {
+        let builder = Builder::default();
+        assert!(builder.build().is_ok());
+
+        #[cfg(not(any(target_pointer_width = "16", target_pointer_width = "32")))]
+        {
+            let builder = Builder::default()
+                .set_max_position_hint(const { Position::new((1 << 29) + 1).unwrap() });
+            assert!(builder.build().is_ok());
+
+            let builder = Builder::default()
+                .set_format(Format::Tabix)
+                .set_max_position_hint(const { Position::new((1 << 29) + 1).unwrap() });
+            assert_eq!(builder.build().err(), Some(BuildError::InvalidFormat));
+
+            let builder = Builder::default().set_max_position_hint(Position::MAX);
+            assert_eq!(
+                builder.build().err(),
+                Some(BuildError::UnsupportedMaxPosition)
+            );
+        }
+    }
+
+    #[test]
+    fn test_fit_min_shift_and_depth() {
+        #[cfg(not(target_pointer_width = "16"))]
+        {
+            assert_eq!(fit_min_shift_and_depth(Position::MIN), Some((14, 5)));
+
+            assert_eq!(
+                fit_min_shift_and_depth(const { Position::new(1 << 29).unwrap() }),
+                Some((14, 5))
+            );
+        }
+
+        #[cfg(not(any(target_pointer_width = "16", target_pointer_width = "32")))]
+        {
+            assert_eq!(
+                fit_min_shift_and_depth(const { Position::new((1 << 29) + 1).unwrap() }),
+                Some((14, 6))
+            );
+            assert_eq!(
+                fit_min_shift_and_depth(const { Position::new(1 << 41).unwrap() }),
+                Some((14, 9))
+            );
+            assert_eq!(
+                fit_min_shift_and_depth(const { Position::new((1 << 41) + 1).unwrap() }),
+                Some((15, 9))
+            );
+            assert_eq!(
+                fit_min_shift_and_depth(const { Position::new(1 << 63).unwrap() }),
+                Some((36, 9))
+            );
+            assert!(
+                fit_min_shift_and_depth(const { Position::new((1 << 63) + 1).unwrap() }).is_none()
+            );
+            assert!(fit_min_shift_and_depth(Position::MAX).is_none());
+        }
+    }
+
+    #[test]
+    fn test_calculate_max_position() {
+        #[cfg(not(target_pointer_width = "16"))]
+        assert_eq!(
+            calculate_max_position(14, 5),
+            Some(const { Position::new(1 << 29).unwrap() })
+        );
+
+        #[cfg(not(any(target_pointer_width = "16", target_pointer_width = "32")))]
+        {
+            assert_eq!(
+                calculate_max_position(14, 9),
+                Some(const { Position::new(1 << 41).unwrap() })
+            );
+
+            assert_eq!(
+                calculate_max_position(48, 5),
+                Some(const { Position::new(1 << 63).unwrap() })
+            );
+
+            assert!(calculate_max_position(49, 5).is_none());
+        }
+    }
+}

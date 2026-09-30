@@ -6,15 +6,15 @@ pub(super) async fn read_magic_number<R>(reader: &mut R) -> io::Result<()>
 where
     R: AsyncRead + Unpin,
 {
-    let mut magic = [0; 4];
-    reader.read_exact(&mut magic).await?;
+    let mut buf = [0; MAGIC_NUMBER.len()];
+    reader.read_exact(&mut buf).await?;
 
-    if magic == MAGIC_NUMBER {
+    if buf == MAGIC_NUMBER {
         Ok(())
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "invalid CSI header",
+            format!("invalid magic number: expected {MAGIC_NUMBER:#04x?}, got {buf:#04x?}"),
         ))
     }
 }

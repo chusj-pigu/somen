@@ -1,8 +1,7 @@
 use std::{
-    ffi::{OsStr, OsString},
     fs::File,
     io::{self, Read},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use super::IndexedReader;
@@ -17,22 +16,37 @@ pub struct Builder {
 
 impl Builder {
     /// Sets a GZ index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noodles_bgzf::{self as bgzf, gzi};
+    /// let index = gzi::Index::default();
+    /// let builder = bgzf::io::indexed_reader::Builder::default().set_index(index);
+    /// ```
     pub fn set_index(mut self, index: gzi::Index) -> Self {
         self.index = Some(index);
         self
     }
 
     /// Builds an indexed BGZF reader from a path.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use noodles_bgzf as bgzf;
+    /// let reader = bgzf::io::indexed_reader::Builder::default().build_from_path("src.gz")?;
+    /// # Ok::<_, std::io::Error>(())
+    /// ```
     pub fn build_from_path<P>(self, src: P) -> io::Result<IndexedReader<File>>
     where
         P: AsRef<Path>,
     {
+        let src = src.as_ref();
+
         let index = match self.index {
             Some(index) => index,
-            None => {
-                let index_src = build_index_src(&src);
-                gzi::fs::read(index_src)?
-            }
+            None => crate::fs::read_associated_index(src)?,
         };
 
         let inner = self.reader_builder.build_from_path(src)?;
@@ -40,7 +54,20 @@ impl Builder {
         Ok(IndexedReader { inner, index })
     }
 
-    /// Builds a indexed BGZF reader from a reader.
+    /// Builds an indexed BGZF reader from a reader.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use std::io;
+    /// use noodles_bgzf::{self as bgzf, gzi};
+    ///
+    /// let index = gzi::Index::default();
+    /// let reader = bgzf::io::indexed_reader::Builder::default()
+    ///     .set_index(index)
+    ///     .build_from_reader(io::empty())?;
+    /// # Ok::<_, io::Error>(())
+    /// ```
     pub fn build_from_reader<R>(self, reader: R) -> io::Result<IndexedReader<R>>
     where
         R: Read,
@@ -52,36 +79,5 @@ impl Builder {
         let inner = self.reader_builder.build_from_reader(reader);
 
         Ok(IndexedReader { inner, index })
-    }
-}
-
-fn build_index_src<P>(src: P) -> PathBuf
-where
-    P: AsRef<Path>,
-{
-    const EXT: &str = "gzi";
-    push_ext(src.as_ref().into(), EXT)
-}
-
-fn push_ext<S>(path: PathBuf, ext: S) -> PathBuf
-where
-    S: AsRef<OsStr>,
-{
-    let mut s = OsString::from(path);
-    s.push(".");
-    s.push(ext);
-    PathBuf::from(s)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_build_index_src() {
-        assert_eq!(
-            build_index_src("noodles.gz"),
-            PathBuf::from("noodles.gz.gzi")
-        );
     }
 }

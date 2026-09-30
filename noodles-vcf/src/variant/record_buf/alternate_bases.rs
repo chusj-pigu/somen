@@ -16,9 +16,23 @@ impl AsMut<Vec<String>> for AlternateBases {
     }
 }
 
+impl Extend<String> for AlternateBases {
+    fn extend<T: IntoIterator<Item = String>>(&mut self, iter: T) {
+        self.0.extend(iter);
+    }
+}
+
 impl From<Vec<String>> for AlternateBases {
     fn from(alleles: Vec<String>) -> Self {
         Self(alleles)
+    }
+}
+
+impl FromIterator<String> for AlternateBases {
+    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
+        let mut alternate_bases = Self::default();
+        alternate_bases.extend(iter);
+        alternate_bases
     }
 }
 

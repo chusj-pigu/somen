@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+  * gff: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * gff/feature/record: Change reference sequence name, source, and type to
+    return `Cow<'_, BStr>` ([#407]).
+
+  * gff/io/writer/line/record: Percent-encode source and type ([#407]).
+
+  * gff/record: Percent-decode reference sequence name, source, and type
+    ([#407]).
+
+[#407]: https://github.com/zaeleus/noodles/pull/407
+
+### Fixed
+
+  * gff/io/reader/line_bufs: Fix `LineBufs` not removing comment prefix (`#`).
+
+## 0.62.0 - 2026-08-21
+
+### Changed
+
+  * gff: Sync dependencies.
+
+## 0.61.0 - 2026-08-03
+
+### Changed
+
+  * gff: Sync dependencies.
+
+## 0.60.0 - 2026-07-31
+
+### Changed
+
+  * gff: Sync dependencies.
+
 ## 0.59.0 - 2026-07-24
 
 ### Changed

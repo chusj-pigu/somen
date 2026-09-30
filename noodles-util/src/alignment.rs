@@ -3,8 +3,10 @@
 #[cfg(feature = "async")]
 pub mod r#async;
 
+pub mod fs;
+mod index;
 pub mod io;
 pub mod iter;
 mod record;
 
-pub use self::record::Record;
+pub use self::{index::Index, record::Record};

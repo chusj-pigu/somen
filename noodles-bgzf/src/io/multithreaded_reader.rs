@@ -7,7 +7,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 
-use super::Block;
+use super::{Block, reader::frame::block_initialize};
 use crate::{VirtualPosition, gzi};
 
 type BufferedRx = Receiver<io::Result<Buffer>>;
@@ -19,9 +19,9 @@ type RecycleRx = Receiver<Buffer>;
 const NON_WORKER_COUNT: usize = 2;
 
 enum State<R> {
-    Paused(R),
+    Paused((R, rayon::ThreadPool)),
     Running {
-        reader_handle: JoinHandle<Result<R, ReadError<R>>>,
+        reader_handle: JoinHandle<(R, rayon::ThreadPool)>,
         read_rx: ReadRx,
         recycle_tx: RecycleTx,
     },
@@ -40,6 +40,7 @@ struct Buffer {
 /// the inner reader on its own thread to read raw frames asynchronously.
 pub struct MultithreadedReader<R> {
     state: State<R>,
+    worker_count: NonZero<usize>,
     position: u64,
     buffer: Buffer,
 }
@@ -88,14 +89,18 @@ impl<R> MultithreadedReader<R> {
         let state = mem::replace(&mut self.state, State::Done);
 
         match state {
-            State::Paused(inner) => Ok(inner),
+            State::Paused((inner, _)) => Ok(inner),
             State::Running {
                 reader_handle,
+                read_rx,
                 recycle_tx,
-                ..
             } => {
                 drop(recycle_tx);
-                reader_handle.join().unwrap().map_err(|e| e.1)
+
+                let err = read_rx_drain(&read_rx);
+                let (inner, _) = reader_handle.join().unwrap();
+
+                if let Some(e) = err { Err(e) } else { Ok(inner) }
             }
             State::Done => panic!("invalid state"),
         }
@@ -116,11 +121,7 @@ where
     /// let reader = bgzf::io::MultithreadedReader::new(io::empty());
     /// ```
     pub fn new(inner: R) -> Self {
-        Self {
-            state: State::Paused(inner),
-            position: 0,
-            buffer: Buffer::default(),
-        }
+        Self::with_worker_count(NonZero::<usize>::MIN, inner)
     }
 
     /// Creates a multithreaded BGZF reader with a worker count.
@@ -136,12 +137,18 @@ where
     ///     io::empty(),
     /// );
     /// ```
-    #[deprecated(
-        since = "0.48.0",
-        note = "Use `rayon::ThreadPoolBuilder` to configure the thread pool."
-    )]
-    pub fn with_worker_count(_worker_count: NonZero<usize>, inner: R) -> Self {
-        Self::new(inner)
+    pub fn with_worker_count(worker_count: NonZero<usize>, inner: R) -> Self {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(worker_count.get())
+            .build()
+            .unwrap();
+
+        Self {
+            state: State::Paused((inner, pool)),
+            worker_count,
+            position: 0,
+            buffer: Buffer::default(),
+        }
     }
 
     /// Returns a mutable reference to the underlying reader.
@@ -158,7 +165,7 @@ where
         self.pause();
 
         match &mut self.state {
-            State::Paused(inner) => inner,
+            State::Paused((inner, _)) => inner,
             _ => panic!("invalid state"),
         }
     }
@@ -170,11 +177,11 @@ where
 
         let state = mem::replace(&mut self.state, State::Done);
 
-        let State::Paused(inner) = state else {
+        let State::Paused((inner, pool)) = state else {
             panic!("invalid state");
         };
 
-        let worker_count = rayon::current_num_threads();
+        let worker_count = self.worker_count.get();
         let buffer_count = worker_count + NON_WORKER_COUNT;
 
         let (read_tx, read_rx) = crossbeam_channel::bounded(buffer_count);
@@ -184,7 +191,7 @@ where
             recycle_tx.send(Buffer::default()).unwrap();
         }
 
-        let reader_handle = spawn_reader(inner, read_tx, recycle_rx);
+        let reader_handle = spawn_reader(inner, pool, read_tx, recycle_rx);
 
         self.state = State::Running {
             reader_handle,
@@ -202,8 +209,8 @@ where
 
         let State::Running {
             reader_handle,
+            read_rx,
             recycle_tx,
-            ..
         } = state
         else {
             panic!("invalid state");
@@ -212,12 +219,11 @@ where
         drop(recycle_tx);
 
         // Discard read errors.
-        let inner = match reader_handle.join().unwrap() {
-            Ok(inner) => inner,
-            Err(ReadError(inner, _)) => inner,
-        };
+        let _ = read_rx_drain(&read_rx);
 
-        self.state = State::Paused(inner);
+        let (inner, pool) = reader_handle.join().unwrap();
+
+        self.state = State::Paused((inner, pool));
     }
 
     fn read_block(&mut self) -> io::Result<()> {
@@ -232,14 +238,20 @@ where
             panic!("invalid state");
         };
 
-        while let Some(mut buffer) = recv_buffer(read_rx)? {
-            buffer.block.set_position(self.position);
-            self.position += buffer.block.size();
+        loop {
+            if let Some(mut buffer) = recv_buffer(read_rx)? {
+                buffer.block.set_position(self.position);
+                self.position += buffer.block.size();
 
-            let prev_buffer = mem::replace(&mut self.buffer, buffer);
-            recycle_tx.send(prev_buffer).ok();
+                let prev_buffer = mem::replace(&mut self.buffer, buffer);
+                recycle_tx.send(prev_buffer).ok();
 
-            if self.buffer.block.data().len() > 0 {
+                if self.buffer.block.data().len() > 0 {
+                    break;
+                }
+            } else {
+                block_initialize(&mut self.buffer.block, 0, 0);
+                self.buffer.block.set_position(self.position);
                 break;
             }
         }
@@ -320,7 +332,13 @@ where
 
         self.read_block()?;
 
-        self.buffer.block.data_mut().set_position(usize::from(upos));
+        let data = self.buffer.block.data_mut();
+
+        if usize::from(upos) <= data.len() {
+            data.set_position(usize::from(upos));
+        } else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
 
         Ok(pos)
     }
@@ -338,21 +356,20 @@ where
 
 fn recv_buffer(read_rx: &ReadRx) -> io::Result<Option<Buffer>> {
     if let Ok(buffered_rx) = read_rx.recv()
-        && let Ok(buffer) = buffered_rx.recv()
+        && let Ok(result) = buffered_rx.recv()
     {
-        return buffer.map(Some);
+        return result.map(Some);
     }
 
     Ok(None)
 }
 
-struct ReadError<R>(R, io::Error);
-
 fn spawn_reader<R>(
     mut reader: R,
+    pool: rayon::ThreadPool,
     read_tx: ReadTx,
     recycle_rx: RecycleRx,
-) -> JoinHandle<Result<R, ReadError<R>>>
+) -> JoinHandle<(R, rayon::ThreadPool)>
 where
     R: Read + Send + 'static,
 {
@@ -363,12 +380,17 @@ where
             match read_frame_into(&mut reader, &mut buffer.buf) {
                 Ok(result) if result.is_none() => break,
                 Ok(_) => {}
-                Err(e) => return Err(ReadError(reader, e)),
+                Err(e) => {
+                    let (buffered_tx, buffered_rx) = crossbeam_channel::bounded(1);
+                    let _ = buffered_tx.send(Err(e));
+                    let _ = read_tx.send(buffered_rx);
+                    break;
+                }
             }
 
             let (buffered_tx, buffered_rx) = crossbeam_channel::bounded(1);
 
-            rayon::spawn(move || {
+            pool.spawn(move || {
                 let result = parse_block(&buffer.buf, &mut buffer.block).map(|_| buffer);
                 let _ = buffered_tx.send(result);
             });
@@ -378,8 +400,20 @@ where
             }
         }
 
-        Ok(reader)
+        (reader, pool)
     })
+}
+
+fn read_rx_drain(read_rx: &ReadRx) -> Option<io::Error> {
+    let mut err = None;
+
+    while let Ok(buffered_rx) = read_rx.recv() {
+        if let Ok(Err(e)) = buffered_rx.recv() {
+            err.get_or_insert(e);
+        }
+    }
+
+    err
 }
 
 #[cfg(test)]
@@ -387,6 +421,47 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
+    use crate::io::Seek;
+
+    #[test]
+    fn test_fill_buf_with_frame_reader_error() {
+        static DATA: &[u8] = &[
+            // EOF block with invalid BSIZE (255)
+            0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43,
+            0x02, 0x00, 0xff, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let mut reader = MultithreadedReader::new(Cursor::new(DATA));
+
+        assert!(matches!(
+            reader.fill_buf(),
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof
+        ));
+    }
+
+    #[test]
+    fn test_seek_to_virtual_position_with_uncompressed_position_gt_data_len()
+    -> Result<(), crate::virtual_position::TryFromU64U16TupleError> {
+        #[rustfmt::skip]
+        static DATA: &[u8] = &[
+            // block 0 (b"noodles")
+            0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43,
+            0x02, 0x00, 0x22, 0x00, 0xcb, 0xcb, 0xcf, 0x4f, 0xc9, 0x49, 0x2d, 0x06, 0x00, 0xa1,
+            0x58, 0x2a, 0x80, 0x07, 0x00, 0x00, 0x00,
+            // EOF block
+            0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43,
+            0x02, 0x00, 0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let mut reader = MultithreadedReader::new(Cursor::new(DATA));
+
+        assert!(matches!(
+            reader.seek_to_virtual_position(VirtualPosition::try_from((0, 8))?),
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
+        ));
+
+        Ok(())
+    }
 
     #[test]
     fn test_seek_to_virtual_position() -> Result<(), Box<dyn std::error::Error>> {

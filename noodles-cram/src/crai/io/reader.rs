@@ -81,6 +81,7 @@ where
 
     while read_record(reader, buf, &mut record)? != 0 {
         index.push(record.clone());
+        buf.clear();
     }
 
     Ok(index)
@@ -118,20 +119,16 @@ mod tests {
 
     #[test]
     fn test_read_index() -> Result<(), Box<dyn std::error::Error>> {
-        let data = b"0\t10946\t6765\t17711\t233\t317811\n";
+        let data = b"0\t1\t1\t2\t3\t5\n1\t8\t13\t21\t34\t55\n";
 
         let mut reader = &data[..];
         let mut buf = String::new();
         let actual = read_index(&mut reader, &mut buf)?;
 
-        let expected = vec![Record::new(
-            Some(0),
-            Position::new(10946),
-            6765,
-            17711,
-            233,
-            317811,
-        )];
+        let expected = vec![
+            Record::new(Some(0), Position::new(1), 1, 2, 3, 5),
+            Record::new(Some(1), Position::new(8), 13, 21, 34, 55),
+        ];
 
         assert_eq!(actual, expected);
 

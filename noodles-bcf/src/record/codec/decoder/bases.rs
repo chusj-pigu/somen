@@ -34,8 +34,7 @@ pub(crate) fn read_ref_alt(src: &mut &[u8], len: usize) -> io::Result<(String, A
             s.parse()
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map(AlternateBases::from)?;
+        .collect::<Result<_, _>>()?;
 
     Ok((reference_bases, alternate_bases))
 }

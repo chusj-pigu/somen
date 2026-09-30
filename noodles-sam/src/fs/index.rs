@@ -1,5 +1,6 @@
 use std::{fs::File, io, path::Path};
 
+use bstr::ByteSlice;
 use noodles_bgzf as bgzf;
 use noodles_core::Position;
 use noodles_csi::{
@@ -50,7 +51,7 @@ where
             io::ErrorKind::InvalidData,
             format!(
                 "invalid sort order: expected {:?}, got {:?}",
-                Some(COORDINATE),
+                Some(COORDINATE.as_bstr()),
                 header
                     .header()
                     .and_then(|hdr| hdr.other_fields().get(&SORT_ORDER))
@@ -68,14 +69,16 @@ where
         let chunk = Chunk::new(start_position, end_position);
 
         let alignment_context = match alignment_context(&header, &record)? {
-            (Some(id), Some(start), Some(end)) => {
+            Some((id, start, end)) => {
                 let is_mapped = !record.flags()?.is_unmapped();
                 Some((id, start, end, is_mapped))
             }
             _ => None,
         };
 
-        indexer.add_record(alignment_context, chunk)?;
+        indexer
+            .add_record(alignment_context, chunk)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         start_position = end_position;
     }
@@ -94,12 +97,15 @@ fn is_coordinate_sorted(header: &Header) -> bool {
 fn alignment_context(
     header: &Header,
     record: &Record,
-) -> io::Result<(Option<usize>, Option<Position>, Option<Position>)> {
-    Ok((
+) -> io::Result<Option<(usize, Position, Position)>> {
+    match (
         record.reference_sequence_id(header).transpose()?,
         record.alignment_start().transpose()?,
         record.alignment_end().transpose()?,
-    ))
+    ) {
+        (Some(id), Some(start), Some(end)) => Ok(Some((id, start, end))),
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]

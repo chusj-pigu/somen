@@ -1,6 +1,7 @@
 //! CSI index reader.
 
 pub(crate) mod header;
+mod magic_number;
 pub mod reference_sequences;
 
 use std::{
@@ -9,8 +10,13 @@ use std::{
     num,
 };
 
+use crate::io::MAX_DEPTH;
+
 pub use self::header::read_header;
-use self::{header::read_aux, reference_sequences::read_reference_sequences};
+use self::{
+    header::read_aux, magic_number::read_magic_number,
+    reference_sequences::read_reference_sequences,
+};
 use super::{
     Index,
     num::{read_i32_le, read_u64_le},
@@ -22,11 +28,11 @@ pub enum ReadError {
     /// I/O error.
     Io(io::Error),
     /// The magic number is invalid.
-    InvalidMagicNumber([u8; 4]),
+    InvalidMagicNumber(magic_number::ReadError),
     /// The min shift is invalid.
     InvalidMinShift(num::TryFromIntError),
     /// The depth is invalid.
-    InvalidDepth(num::TryFromIntError),
+    InvalidDepth,
     /// The header is invalid.
     InvalidHeader(header::ReadError),
     /// A reference sequence is invalid.
@@ -39,7 +45,7 @@ impl error::Error for ReadError {
             Self::Io(e) => Some(e),
             Self::InvalidMagicNumber(_) => None,
             Self::InvalidMinShift(e) => Some(e),
-            Self::InvalidDepth(e) => Some(e),
+            Self::InvalidDepth => None,
             Self::InvalidHeader(e) => Some(e),
             Self::InvalidReferenceSequences(e) => Some(e),
         }
@@ -52,7 +58,7 @@ impl fmt::Display for ReadError {
             Self::Io(_) => write!(f, "I/O error"),
             Self::InvalidMagicNumber(_) => write!(f, "invalid magic number"),
             Self::InvalidMinShift(_) => write!(f, "invalid min shift"),
-            Self::InvalidDepth(_) => write!(f, "invalid depth"),
+            Self::InvalidDepth => write!(f, "invalid depth"),
             Self::InvalidHeader(_) => write!(f, "invalid header"),
             Self::InvalidReferenceSequences(_) => write!(f, "invalid reference sequences"),
         }
@@ -69,7 +75,7 @@ pub(super) fn read_index<R>(reader: &mut R) -> Result<Index, ReadError>
 where
     R: Read,
 {
-    read_magic(reader)?;
+    read_magic_number(reader).map_err(ReadError::InvalidMagicNumber)?;
 
     let min_shift = read_min_shift(reader)?;
     let depth = read_depth(reader)?;
@@ -97,22 +103,6 @@ where
     Ok(builder.build())
 }
 
-fn read_magic<R>(reader: &mut R) -> Result<(), ReadError>
-where
-    R: Read,
-{
-    use crate::io::MAGIC_NUMBER;
-
-    let mut magic = [0; 4];
-    reader.read_exact(&mut magic)?;
-
-    if magic == MAGIC_NUMBER {
-        Ok(())
-    } else {
-        Err(ReadError::InvalidMagicNumber(magic))
-    }
-}
-
 fn read_min_shift<R>(reader: &mut R) -> Result<u8, ReadError>
 where
     R: Read,
@@ -126,7 +116,13 @@ where
     R: Read,
 {
     let n = read_i32_le(reader)?;
-    u8::try_from(n).map_err(ReadError::InvalidDepth)
+    let depth = u8::try_from(n).map_err(|_| ReadError::InvalidDepth)?;
+
+    if depth <= MAX_DEPTH {
+        Ok(depth)
+    } else {
+        Err(ReadError::InvalidDepth)
+    }
 }
 
 fn read_unplaced_unmapped_record_count<R>(reader: &mut R) -> Result<Option<u64>, ReadError>
@@ -143,37 +139,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_read_magic() {
-        let data = b"CSI\x01";
-        let mut reader = &data[..];
-        assert!(read_magic(&mut reader).is_ok());
-    }
-
-    #[test]
-    fn test_read_magic_with_invalid_magic_number() {
-        let data = [];
-        let mut reader = &data[..];
-        assert!(matches!(
-            read_magic(&mut reader),
-            Err(ReadError::Io(e)) if e.kind() == io::ErrorKind::UnexpectedEof
-        ));
-
-        let data = b"CSI";
-        let mut reader = &data[..];
-        assert!(matches!(
-            read_magic(&mut reader),
-            Err(ReadError::Io(e)) if e.kind() == io::ErrorKind::UnexpectedEof
-        ));
-
-        let data = b"MThd";
-        let mut reader = &data[..];
-        assert!(matches!(
-            read_magic(&mut reader),
-            Err(ReadError::InvalidMagicNumber([b'M', b'T', b'h', b'd']))
-        ));
-    }
 
     #[test]
     fn test_read_min_shift() -> Result<(), ReadError> {
@@ -197,19 +162,25 @@ mod tests {
 
     #[test]
     fn test_read_depth() -> Result<(), ReadError> {
+        let src = [0x00, 0x00, 0x00, 0x00]; // depth = 0
+        assert_eq!(read_depth(&mut &src[..])?, 0);
+
         let src = [0x05, 0x00, 0x00, 0x00]; // depth = 5
         assert_eq!(read_depth(&mut &src[..])?, 5);
+
+        let src = [0x09, 0x00, 0x00, 0x00]; // depth = 9
+        assert_eq!(read_depth(&mut &src[..])?, 9);
 
         let src = [0xff, 0xff, 0xff, 0xff]; // depth = -1
         assert!(matches!(
             read_depth(&mut &src[..]),
-            Err(ReadError::InvalidDepth(_))
+            Err(ReadError::InvalidDepth)
         ));
 
-        let src = [0x00, 0x01, 0x00, 0x00]; // depth = 256
+        let src = [0x0a, 0x00, 0x00, 0x00]; // depth = 10
         assert!(matches!(
             read_depth(&mut &src[..]),
-            Err(ReadError::InvalidDepth(_))
+            Err(ReadError::InvalidDepth)
         ));
 
         Ok(())

@@ -1,4 +1,4 @@
-//! Indxed BCF reader.
+//! Indexed BCF reader.
 
 mod builder;
 

@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+  * bed: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+## 0.39.0 - 2026-08-21
+
+### Changed
+
+  * bed: Sync dependencies.
+
+## 0.38.0 - 2026-08-03
+
+### Changed
+
+  * bed: Sync dependencies.
+
+## 0.37.0 - 2026-07-31
+
+### Changed
+
+  * bed: Sync dependencies.
+
 ## 0.36.0 - 2026-07-24
 
 ### Fixed

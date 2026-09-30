@@ -1,22 +1,26 @@
-use std::{io, path::Path};
+use std::{io, num::NonZero, path::Path};
 
+use bstr::ByteSlice;
 use noodles_bgzf as bgzf;
 use noodles_core::Position;
-use noodles_csi::binning_index::{Indexer, index::reference_sequence::bin::Chunk};
+use noodles_csi::binning_index::index::reference_sequence::bin::Chunk;
 use noodles_sam::{
     self as sam,
     alignment::Record as _,
     header::record::value::map::header::{sort_order::COORDINATE, tag::SORT_ORDER},
 };
 
-use crate::{Record, bai, io::Reader};
+use crate::{Index, Record, index::Indexer, io::Reader};
 
 /// Indexes a BAM file.
 ///
-/// The input must be coordinate-sorted and marked as such in the SAM header, i.e.,
-/// `SO:coordinate`.
+/// The input must be coordinate-sorted and marked as such in the SAM header, i.e., `SO:coordinate`.
 ///
-/// See also [`bai::fs::write`] to write the resulting [`bai::Index`] to a file.
+/// This typically returns the index as a BAM index (BAI); however, if the length of a reference
+/// sequence is longer than 2<sup>29</sup>, this returns a coordinate-sorted index (CSI) instead.
+///
+/// See also [`crate::bai::fs::write`] and [`noodles_csi::fs::write`] to write the resulting
+/// [`Index`] to a file.
 ///
 /// # Examples
 ///
@@ -25,7 +29,7 @@ use crate::{Record, bai, io::Reader};
 /// let _index = bam::fs::index("sample.bam")?;
 /// # Ok::<_, std::io::Error>(())
 /// ```
-pub fn index<P>(src: P) -> io::Result<bai::Index>
+pub fn index<P>(src: P) -> io::Result<Index>
 where
     P: AsRef<Path>,
 {
@@ -33,7 +37,7 @@ where
     index_inner(&mut reader)
 }
 
-fn index_inner<R>(reader: &mut Reader<R>) -> io::Result<bai::Index>
+fn index_inner<R>(reader: &mut Reader<R>) -> io::Result<Index>
 where
     R: bgzf::io::Read,
 {
@@ -44,7 +48,7 @@ where
             io::ErrorKind::InvalidData,
             format!(
                 "invalid sort order: expected {:?}, got {:?}",
-                Some(COORDINATE),
+                Some(COORDINATE.as_bstr()),
                 header
                     .header()
                     .and_then(|hdr| hdr.other_fields().get(&SORT_ORDER))
@@ -54,7 +58,21 @@ where
 
     let mut record = Record::default();
 
-    let mut builder = Indexer::default();
+    let max_reference_sequence_length = header
+        .reference_sequences()
+        .values()
+        .map(|rs| rs.length())
+        .max()
+        .unwrap_or(NonZero::<usize>::MIN);
+
+    // SAFETY: `max_reference_sequence_length` is nonzero.
+    let max_position = Position::new(max_reference_sequence_length.get()).unwrap();
+
+    let mut indexer = Indexer::builder()
+        .set_max_position_hint(max_position)
+        .build()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
     let mut start_position = reader.get_ref().virtual_position();
 
     while reader.read_record(&mut record)? != 0 {
@@ -62,19 +80,21 @@ where
         let chunk = Chunk::new(start_position, end_position);
 
         let alignment_context = match alignment_context(&record)? {
-            (Some(id), Some(start), Some(end)) => {
+            Some((id, start, end)) => {
                 let is_mapped = !record.flags().is_unmapped();
                 Some((id, start, end, is_mapped))
             }
             _ => None,
         };
 
-        builder.add_record(alignment_context, chunk)?;
+        indexer
+            .add_record(alignment_context, chunk)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         start_position = end_position;
     }
 
-    Ok(builder.build(header.reference_sequences().len()))
+    Ok(indexer.build(header.reference_sequences().len()))
 }
 
 fn is_coordinate_sorted(header: &sam::Header) -> bool {
@@ -85,14 +105,15 @@ fn is_coordinate_sorted(header: &sam::Header) -> bool {
         .unwrap_or_default()
 }
 
-fn alignment_context(
-    record: &Record,
-) -> io::Result<(Option<usize>, Option<Position>, Option<Position>)> {
-    Ok((
+fn alignment_context(record: &Record) -> io::Result<Option<(usize, Position, Position)>> {
+    match (
         record.reference_sequence_id().transpose()?,
         record.alignment_start().transpose()?,
         record.alignment_end().transpose()?,
-    ))
+    ) {
+        (Some(id), Some(start), Some(end)) => Ok(Some((id, start, end))),
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -149,7 +170,10 @@ mod tests {
         let data = writer.into_inner().into_inner();
 
         let mut reader = Reader::new(&data[..]);
-        let index = index_inner(&mut reader)?;
+
+        let Index::Bai(index) = index_inner(&mut reader)? else {
+            panic!();
+        };
 
         assert_eq!(index.min_shift(), 14);
         assert_eq!(index.depth(), 5);

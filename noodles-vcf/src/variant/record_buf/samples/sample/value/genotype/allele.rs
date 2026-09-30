@@ -135,10 +135,13 @@ impl FromStr for Allele {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
             return Err(ParseError::Empty);
+        } else if !s.starts_with(['|', '/']) {
+            return Err(ParseError::InvalidPhasing);
         }
 
-        let phasing = parse_phasing(&s[..1])?;
-        let position = parse_position(&s[1..])?;
+        let (raw_phasing, raw_position) = s.split_at(1);
+        let phasing = parse_phasing(raw_phasing)?;
+        let position = parse_position(raw_position)?;
 
         Ok(Allele::new(position, phasing))
     }

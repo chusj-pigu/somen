@@ -54,12 +54,18 @@ pub(super) fn read_reference_sequence_names<R>(
 where
     R: Read,
 {
-    let l_nm = read_i32_le(reader)
-        .map_err(ReadError::Io)
-        .and_then(|n| u64::try_from(n).map_err(ReadError::InvalidLength))?;
-
-    let mut names_reader = BufReader::new(reader.take(l_nm));
+    let len = read_reference_sequence_names_size(reader)?;
+    let mut names_reader = BufReader::new(reader.take(len));
     read_names(&mut names_reader)
+}
+
+fn read_reference_sequence_names_size<R>(reader: &mut R) -> Result<u64, ReadError>
+where
+    R: Read,
+{
+    read_i32_le(reader)
+        .map_err(ReadError::Io)
+        .and_then(|n| u64::try_from(n).map_err(ReadError::InvalidLength))
 }
 
 fn read_names<R>(reader: &mut R) -> Result<ReferenceSequenceNames, ReadError>
@@ -161,5 +167,30 @@ mod tests {
             read_names(&mut reader),
             Err(ReadError::ExpectedEof)
         ));
+    }
+
+    #[test]
+    fn test_read_reference_sequence_names_size() -> Result<(), ReadError> {
+        fn t(mut src: &[u8], expected: u64) -> Result<(), ReadError> {
+            let actual = read_reference_sequence_names_size(&mut src)?;
+            assert_eq!(actual, expected);
+            Ok(())
+        }
+
+        t(&[0x00, 0x00, 0x00, 0x00], 0)?;
+        t(&[0x01, 0x00, 0x00, 0x00], 1)?;
+        t(&[0x00, 0x01, 0x00, 0x00], 256)?;
+
+        assert!(matches!(
+            read_reference_sequence_names_size(&mut io::empty()),
+            Err(ReadError::Io(e)) if e.kind() == io::ErrorKind::UnexpectedEof
+        ));
+
+        assert!(matches!(
+            read_reference_sequence_names_size(&mut &[0xff, 0xff, 0xff, 0xff][..]),
+            Err(ReadError::InvalidLength(_))
+        ));
+
+        Ok(())
     }
 }

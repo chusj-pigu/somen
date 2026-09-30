@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * sam/fs: Add convenience function to read associated SAM index
+    (`sam::fs::read_associated_index`).
+
+### Changed
+
+  * sam: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+## 0.90.0 - 2026-08-21
+
+### Changed
+
+  * sam/record/data/field/value/base_modifications/group/modification: Allow
+    all uppercase alphabetic modification codes.
+
+    This previously only allowed lowercase letters and ambiguity codes (`C`,
+    `T`, `U`, `A`, `G`, and `N`). [samtools/hts-specs@510c107] expands it to
+    include all uppercase letters.
+
+[samtools/hts-specs@510c107]: https://github.com/samtools/hts-specs/commit/510c107ba89aa13113818c9e4fa3071283cb7f7b
+
+## 0.89.0 - 2026-08-03
+
+### Changed
+
+  * sam: Sync dependencies.
+
+## 0.88.0 - 2026-07-31
+
+### Changed
+
+  * sam: Sync dependencies.
+
 ## 0.87.0 - 2026-07-24
 
 ### Changed

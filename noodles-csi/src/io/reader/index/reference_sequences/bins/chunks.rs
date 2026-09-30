@@ -48,11 +48,17 @@ pub fn read_chunks<R>(reader: &mut R) -> Result<Vec<Chunk>, ReadError>
 where
     R: Read,
 {
-    let n_chunk = read_i32_le(reader)
-        .map_err(ReadError::Io)
-        .and_then(|n| usize::try_from(n).map_err(ReadError::InvalidChunkCount))?;
+    let chunk_count = read_chunk_count(reader)?;
+    (0..chunk_count).map(|_| read_chunk(reader)).collect()
+}
 
-    (0..n_chunk).map(|_| read_chunk(reader)).collect()
+fn read_chunk_count<R>(reader: &mut R) -> Result<usize, ReadError>
+where
+    R: Read,
+{
+    read_i32_le(reader)
+        .map_err(ReadError::Io)
+        .and_then(|n| usize::try_from(n).map_err(ReadError::InvalidChunkCount))
 }
 
 fn read_chunk<R>(reader: &mut R) -> Result<Chunk, ReadError>
@@ -67,6 +73,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_read_chunk_count() -> Result<(), ReadError> {
+        assert_eq!(read_chunk_count(&mut &[0x00, 0x00, 0x00, 0x00][..])?, 0);
+        assert_eq!(read_chunk_count(&mut &[0x01, 0x00, 0x00, 0x00][..])?, 1);
+        assert_eq!(read_chunk_count(&mut &[0x00, 0x01, 0x00, 0x00][..])?, 256);
+
+        assert!(matches!(
+            read_chunk_count(&mut io::empty()),
+            Err(ReadError::Io(e)) if e.kind() == io::ErrorKind::UnexpectedEof
+        ));
+        assert!(matches!(
+            read_chunk_count(&mut &[0xff, 0xff, 0xff, 0xff][..]),
+            Err(ReadError::InvalidChunkCount(_))
+        ));
+
+        Ok(())
+    }
 
     #[test]
     fn test_read_chunks() -> Result<(), ReadError> {

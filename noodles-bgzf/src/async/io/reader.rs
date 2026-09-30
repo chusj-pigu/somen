@@ -17,7 +17,10 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, ReadBuf};
 
 pub use self::builder::Builder;
 use self::inflater::Inflater;
-use crate::{VirtualPosition, gzi, io::Block};
+use crate::{
+    VirtualPosition, gzi,
+    io::{Block, reader::frame::block_initialize},
+};
 
 enum SeekState<R>
 where
@@ -170,28 +173,41 @@ where
     /// # }
     /// ```
     pub async fn seek(&mut self, pos: VirtualPosition) -> io::Result<VirtualPosition> {
+        let (cpos, upos) = pos.into();
+
         let stream = self.stream.take().expect("missing stream");
         let mut blocks = stream.into_inner();
 
-        blocks.seek(pos).await?;
+        if let Err(e) = blocks.seek(pos).await {
+            let stream = blocks.try_buffered(self.worker_count.get());
+            self.stream.replace(stream);
+            return Err(e);
+        }
 
         let mut stream = blocks.try_buffered(self.worker_count.get());
+        let item = stream.try_next().await;
+        self.stream.replace(stream);
 
-        self.block = match stream.try_next().await? {
-            Some(mut block) => {
-                let (cpos, upos) = pos.into();
-
-                self.position = cpos + block.size();
-
-                block.set_position(cpos);
-                block.data_mut().set_position(usize::from(upos));
-
-                block
+        let (block, position) = match item? {
+            Some(block) => {
+                let size = block.size();
+                (block, cpos + size)
             }
-            None => Block::default(),
+            None => (Block::default(), cpos),
         };
 
-        self.stream.replace(stream);
+        self.block = block;
+        self.position = position;
+
+        self.block.set_position(cpos);
+
+        let data = self.block.data_mut();
+
+        if usize::from(upos) <= data.len() {
+            data.set_position(usize::from(upos));
+        } else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
 
         Ok(pos)
     }
@@ -212,7 +228,12 @@ where
                 SeekState::Seek(mut blocks) => {
                     match Pin::new(&mut blocks).poll_seek(cx, pos) {
                         Poll::Ready(Ok(_)) => {}
-                        Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                        Poll::Ready(Err(e)) => {
+                            let stream = blocks.try_buffered(self.worker_count.get());
+                            self.stream.replace(stream);
+                            self.seek_state = Some(SeekState::Init);
+                            return Poll::Ready(Err(e));
+                        }
                         Poll::Pending => {
                             self.seek_state = Some(SeekState::Seek(blocks));
                             return Poll::Pending;
@@ -223,6 +244,8 @@ where
                     Some(SeekState::Finish(stream))
                 }
                 SeekState::Finish(mut stream) => {
+                    let (cpos, upos) = pos.into();
+
                     let item = match Pin::new(&mut stream).poll_next(cx) {
                         Poll::Ready(item) => item,
                         Poll::Pending => {
@@ -231,22 +254,33 @@ where
                         }
                     };
 
-                    self.block = match item {
-                        Some(Ok(mut block)) => {
-                            let (cpos, upos) = pos.into();
+                    self.stream.replace(stream);
 
-                            self.position = cpos + block.size();
-
-                            block.set_position(cpos);
-                            block.data_mut().set_position(usize::from(upos));
-
-                            block
+                    let (block, position) = match item {
+                        Some(Ok(block)) => {
+                            let size = block.size();
+                            (block, cpos + size)
                         }
-                        Some(Err(e)) => return Poll::Ready(Err(e)),
-                        None => Block::default(),
+                        Some(Err(e)) => {
+                            self.seek_state = Some(SeekState::Init);
+                            return Poll::Ready(Err(e));
+                        }
+                        None => (Block::default(), cpos),
                     };
 
-                    self.stream.replace(stream);
+                    self.block = block;
+                    self.position = position;
+
+                    self.block.set_position(cpos);
+
+                    let data = self.block.data_mut();
+
+                    if usize::from(upos) <= data.len() {
+                        data.set_position(usize::from(upos));
+                    } else {
+                        self.seek_state = Some(SeekState::Init);
+                        return Poll::Ready(Err(io::Error::from(io::ErrorKind::InvalidInput)));
+                    }
 
                     Some(SeekState::Done(pos))
                 }
@@ -333,7 +367,11 @@ where
                         }
                     }
                     Some(Err(e)) => return Poll::Ready(Err(e)),
-                    None => return Poll::Ready(Ok(&[])),
+                    None => {
+                        block_initialize(this.block, 0, 0);
+                        this.block.set_position(*this.position);
+                        break;
+                    }
                 }
             }
         }
@@ -415,6 +453,30 @@ mod tests {
 
         assert_eq!(buf, b"dles");
         assert_eq!(reader.virtual_position(), eof);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_seek_with_uncompressed_position_gt_data_len()
+    -> Result<(), crate::virtual_position::TryFromU64U16TupleError> {
+        #[rustfmt::skip]
+        let data = [
+            // block 0 (b"noodles")
+            0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43,
+            0x02, 0x00, 0x22, 0x00, 0xcb, 0xcb, 0xcf, 0x4f, 0xc9, 0x49, 0x2d, 0x06, 0x00, 0xa1,
+            0x58, 0x2a, 0x80, 0x07, 0x00, 0x00, 0x00,
+            // EOF block
+            0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43,
+            0x02, 0x00, 0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let mut reader = Reader::new(Cursor::new(&data));
+
+        assert!(matches!(
+            reader.seek(VirtualPosition::try_from((0, 8))?).await,
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
+        ));
 
         Ok(())
     }

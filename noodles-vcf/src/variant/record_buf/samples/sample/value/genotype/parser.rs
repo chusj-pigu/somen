@@ -1,5 +1,7 @@
 use std::{error, fmt};
 
+use memchr::{memchr, memchr2};
+
 use super::{Allele, Genotype, allele};
 use crate::variant::record::samples::series::value::genotype::Phasing;
 
@@ -30,82 +32,104 @@ impl fmt::Display for ParseError {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FirstPhasing {
-    Explicit(Phasing),
-    Implicit(Phasing),
-}
-
-impl FirstPhasing {
-    fn phasing(&self) -> Phasing {
-        match self {
-            FirstPhasing::Explicit(phasing) => *phasing,
-            FirstPhasing::Implicit(phasing) => *phasing,
-        }
-    }
-}
-
 pub(super) fn parse(mut s: &str) -> Result<Genotype, ParseError> {
     if s.is_empty() {
         return Err(ParseError::Empty);
     }
 
-    let raw_allele = next_allele(&mut s);
-    let first_allele = parse_first_allele(raw_allele).map_err(ParseError::InvalidAllele)?;
-    let (first_position, mut first_phasing) = match first_allele {
-        (position, Some(phasing)) => (position, FirstPhasing::Explicit(phasing)),
-        (position, None) => (position, FirstPhasing::Implicit(Phasing::Phased)),
-    };
-
-    let mut alleles = vec![Allele::new(first_position, first_phasing.phasing())];
+    let first_allele = parse_first_allele(&mut s).map_err(ParseError::InvalidAllele)?;
+    let mut alleles = vec![first_allele];
 
     while !s.is_empty() {
-        let raw_allele = next_allele(&mut s);
-        let allele: Allele = raw_allele.parse().map_err(ParseError::InvalidAllele)?;
-
-        if first_phasing == FirstPhasing::Implicit(Phasing::Phased)
-            && allele.phasing() == Phasing::Unphased
-        {
-            first_phasing = FirstPhasing::Implicit(Phasing::Unphased);
-        }
-
+        let allele = parse_allele(&mut s).map_err(ParseError::InvalidAllele)?;
         alleles.push(allele);
     }
-
-    *alleles[0].phasing_mut() = first_phasing.phasing();
 
     Ok(Genotype(alleles))
 }
 
 fn next_allele<'a>(s: &mut &'a str) -> &'a str {
-    let (t, rest) = match s.chars().skip(1).position(is_phasing_indicator) {
-        Some(i) => s.split_at(i + 1),
-        None => s.split_at(s.len()),
-    };
-
+    let src = &s.as_bytes()[1..];
+    let i = memchr2(b'|', b'/', src).map(|i| i + 1).unwrap_or(s.len());
+    let (buf, rest) = s.split_at(i);
     *s = rest;
-
-    t
+    buf
 }
 
-fn is_phasing_indicator(c: char) -> bool {
-    matches!(c, '/' | '|')
-}
-
-fn parse_first_allele(s: &str) -> Result<(Option<usize>, Option<Phasing>), allele::ParseError> {
+fn parse_first_allele(s: &mut &str) -> Result<Allele, allele::ParseError> {
     use super::allele::{parse_phasing, parse_position};
 
-    match parse_phasing(&s[..1]) {
-        Ok(phasing) => {
-            let position = parse_position(&s[1..])?;
-            Ok((position, Some(phasing)))
-        }
-        Err(_) => {
-            if let Ok(position) = parse_position(s) {
-                Ok((position, None))
-            } else {
-                Err(allele::ParseError::InvalidPhasing)
-            }
-        }
+    let mut buf = next_allele(s);
+
+    let phasing = if let Some(src) = split_off_explicit_phasing(&mut buf) {
+        parse_phasing(src)?
+    } else if is_implicitly_unphased(s) {
+        Phasing::Unphased
+    } else {
+        Phasing::Phased
+    };
+
+    let position = parse_position(buf)?;
+
+    Ok(Allele::new(position, phasing))
+}
+
+fn split_off_explicit_phasing<'a>(src: &mut &'a str) -> Option<&'a str> {
+    if src.starts_with(['|', '/']) {
+        let (buf, rest) = src.split_at(1);
+        *src = rest;
+        Some(buf)
+    } else {
+        None
+    }
+}
+
+// § 1.6.2 "Genotype fields" (2026-02-25): "The first phasing indicator may be omitted and is
+// implicitly defined as / if any phasing indicators are /..."
+fn is_implicitly_unphased(src: &str) -> bool {
+    memchr(b'/', src.as_bytes()).is_some()
+}
+
+fn parse_allele(src: &mut &str) -> Result<Allele, allele::ParseError> {
+    let buf = next_allele(src);
+    buf.parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_off_explicit_phasing() {
+        let mut src = "|0";
+        assert_eq!(split_off_explicit_phasing(&mut src), Some("|"));
+        assert_eq!(src, "0");
+
+        let mut src = "/0";
+        assert_eq!(split_off_explicit_phasing(&mut src), Some("/"));
+        assert_eq!(src, "0");
+
+        let mut src = "0";
+        assert!(split_off_explicit_phasing(&mut src).is_none());
+        assert_eq!(src, "0");
+    }
+
+    #[test]
+    fn test_is_implicitly_unphased() {
+        assert!(!is_implicitly_unphased("0"));
+        assert!(!is_implicitly_unphased("0|0"));
+        assert!(is_implicitly_unphased("0/0"));
+    }
+
+    #[test]
+    fn test_next_allele() {
+        let mut src = "0";
+        assert_eq!(next_allele(&mut src), "0");
+        assert!(src.is_empty());
+
+        let mut src = "|0/0";
+        assert_eq!(next_allele(&mut src), "|0");
+        assert_eq!(next_allele(&mut src), "/0");
+        assert!(src.is_empty());
     }
 }

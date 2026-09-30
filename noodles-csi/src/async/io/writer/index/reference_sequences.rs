@@ -1,7 +1,7 @@
 mod bins;
 mod metadata;
 
-use tokio::io::{self, AsyncWrite};
+use tokio::io::{self, AsyncWrite, AsyncWriteExt};
 
 use self::{bins::write_bins, metadata::write_metadata};
 use crate::binning_index::{
@@ -17,11 +17,26 @@ pub(super) async fn write_reference_sequences<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    write_reference_sequence_count(writer, reference_sequences.len()).await?;
+
     for reference_sequence in reference_sequences {
         write_reference_sequence(writer, depth, reference_sequence).await?;
     }
 
     Ok(())
+}
+
+async fn write_reference_sequence_count<W>(
+    writer: &mut W,
+    reference_sequence_count: usize,
+) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let n = i32::try_from(reference_sequence_count)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    writer.write_i32_le(n).await
 }
 
 async fn write_reference_sequence<W>(

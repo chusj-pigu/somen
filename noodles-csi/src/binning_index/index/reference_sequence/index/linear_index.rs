@@ -7,13 +7,10 @@ use crate::binning_index::index::reference_sequence::bin::Chunk;
 /// A linear index.
 pub type LinearIndex = Vec<bgzf::VirtualPosition>;
 
-// _Sequence Alignment/Map Format Specification_ (2023-05-24) § 5.1.3 "Combining with linear
-// index": "...each tiling 16384bp window..."
-const WINDOW_SIZE: usize = 1 << 14;
-
 impl Index for LinearIndex {
-    fn min_offset(&self, _: u8, _: u8, start: Position) -> bgzf::VirtualPosition {
-        let i = (usize::from(start) - 1) / WINDOW_SIZE;
+    fn min_offset(&self, min_shift: u8, _: u8, start: Position) -> bgzf::VirtualPosition {
+        let window_size = 1 << min_shift;
+        let i = (usize::from(start) - 1) / window_size;
         self.get(i).copied().unwrap_or_default()
     }
 
@@ -21,8 +18,9 @@ impl Index for LinearIndex {
         self.last().copied()
     }
 
-    fn update(&mut self, _: u8, _: u8, _: Position, end: Position, chunk: Chunk) {
-        let end_index = (usize::from(end) - 1) / WINDOW_SIZE;
+    fn update(&mut self, min_shift: u8, _: u8, _: Position, end: Position, chunk: Chunk) {
+        let window_size = 1 << min_shift;
+        let end_index = (usize::from(end) - 1) / window_size;
         let new_len = end_index + 1;
 
         if new_len > self.len() {

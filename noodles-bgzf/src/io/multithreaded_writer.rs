@@ -40,6 +40,7 @@ pub struct MultithreadedWriter<W>
 where
     W: Write + Send + 'static,
 {
+    pool: rayon::ThreadPool,
     state: State<W>,
     buf: BytesMut,
     compression_level: CompressionLevelImpl,
@@ -59,7 +60,7 @@ where
     /// let writer = bgzf::io::MultithreadedWriter::new(io::sink());
     /// ```
     pub fn new(inner: W) -> Self {
-        Builder::default().build_from_writer(inner)
+        Self::with_worker_count(NonZero::<usize>::MIN, inner)
     }
 
     /// Creates a multithreaded BGZF writer with a worker count.
@@ -75,12 +76,10 @@ where
     ///     io::sink(),
     /// );
     /// ```
-    #[deprecated(
-        since = "0.48.0",
-        note = "Use `rayon::ThreadPoolBuilder` to configure the thread pool."
-    )]
-    pub fn with_worker_count(_worker_count: NonZero<usize>, inner: W) -> Self {
-        Self::new(inner)
+    pub fn with_worker_count(worker_count: NonZero<usize>, inner: W) -> Self {
+        Builder::default()
+            .set_worker_count(worker_count)
+            .build_from_writer(inner)
     }
 
     /// Finishes the output stream by flushing any remaining buffers.
@@ -138,7 +137,7 @@ where
         let src = self.buf.split().freeze();
         let compression_level = self.compression_level;
 
-        rayon::spawn(move || {
+        self.pool.spawn(move || {
             let result = compress(&src, compression_level);
             buffered_tx.send(result).ok();
         });

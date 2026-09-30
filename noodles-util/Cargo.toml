@@ -1,6 +1,6 @@
 [package]
 name = "noodles-util"
-version = "0.82.0"
+version = "0.85.0"
 authors = ["Michael Macias <zaeleus@gmail.com>"]
 license.workspace = true
 edition.workspace = true
@@ -42,15 +42,15 @@ variant = [
 [dependencies]
 bstr.workspace = true
 flate2 = { workspace = true }
-noodles-bam = { path = "../noodles-bam", version = "0.92.0", optional = true }
-noodles-bcf = { path = "../noodles-bcf", version = "0.88.0", optional = true }
-noodles-bgzf = { path = "../noodles-bgzf", version = "0.49.0", optional = true }
+noodles-bam = { path = "../noodles-bam", version = "0.95.0", optional = true }
+noodles-bcf = { path = "../noodles-bcf", version = "0.91.0", optional = true }
+noodles-bgzf = { path = "../noodles-bgzf", version = "0.51.0", optional = true }
 noodles-core = { path = "../noodles-core", version = "0.20.0", optional = true }
-noodles-cram = { path = "../noodles-cram", version = "0.96.0", optional = true }
-noodles-csi = { path = "../noodles-csi", version = "0.58.0", optional = true }
-noodles-fasta = { path = "../noodles-fasta", version = "0.64.0", optional = true }
-noodles-sam = { path = "../noodles-sam", version = "0.87.0", optional = true }
-noodles-vcf = { path = "../noodles-vcf", version = "0.90.0", optional = true }
+noodles-cram = { path = "../noodles-cram", version = "0.99.0", optional = true }
+noodles-csi = { path = "../noodles-csi", version = "0.61.0", optional = true }
+noodles-fasta = { path = "../noodles-fasta", version = "0.66.0", optional = true }
+noodles-sam = { path = "../noodles-sam", version = "0.90.0", optional = true }
+noodles-vcf = { path = "../noodles-vcf", version = "0.93.0", optional = true }
 
 futures = { workspace = true, optional = true, features = ["std"] }
 tokio = { workspace = true, optional = true, features = ["fs", "io-util"] }
@@ -73,6 +73,10 @@ name = "util_alignment_query"
 required-features = ["alignment"]
 
 [[example]]
+name = "util_alignment_query_async"
+required-features = ["alignment", "async"]
+
+[[example]]
 name = "util_alignment_rewrite"
 required-features = ["alignment"]
 
@@ -91,6 +95,10 @@ required-features = ["alignment", "async"]
 [[example]]
 name = "util_variant_query"
 required-features = ["variant"]
+
+[[example]]
+name = "util_variant_query_async"
+required-features = ["async", "variant"]
 
 [[example]]
 name = "util_variant_rewrite"

@@ -38,10 +38,6 @@ impl Builder {
     /// let builder = bgzf::io::multithreaded_writer::Builder::default()
     ///     .set_worker_count(NonZero::<usize>::MIN);
     /// ```
-    #[deprecated(
-        since = "0.48.0",
-        note = "Use `rayon::ThreadPoolBuilder` to configure the thread pool."
-    )]
     pub fn set_worker_count(mut self, worker_count: NonZero<usize>) -> Self {
         self.worker_count = worker_count;
         self
@@ -64,13 +60,18 @@ impl Builder {
     {
         use super::{State, spawn_writer};
 
-        let worker_count = rayon::current_num_threads();
+        let worker_count = self.worker_count.get();
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(worker_count)
+            .build()
+            .unwrap();
 
         let (write_tx, write_rx) = crossbeam_channel::bounded(worker_count);
-
         let writer_handle = spawn_writer(writer, write_rx);
 
         MultithreadedWriter {
+            pool,
             state: State::Running {
                 writer_handle,
                 write_tx,

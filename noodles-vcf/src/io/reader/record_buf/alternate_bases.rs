@@ -48,16 +48,13 @@ mod tests {
 
         alternate_bases.as_mut().clear();
         parse_alternate_bases("A", &mut alternate_bases)?;
-        assert_eq!(
-            alternate_bases,
-            AlternateBases::from(vec![String::from("A")])
-        );
+        assert_eq!(alternate_bases, [String::from("A")].into_iter().collect());
 
         alternate_bases.as_mut().clear();
         parse_alternate_bases("A,C", &mut alternate_bases)?;
         assert_eq!(
             alternate_bases,
-            AlternateBases::from(vec![String::from("A"), String::from("C")])
+            [String::from("A"), String::from("C")].into_iter().collect()
         );
 
         alternate_bases.as_mut().clear();

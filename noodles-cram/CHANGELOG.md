@@ -1,5 +1,87 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+  * cram/fs: Add convenience function to read associated CRAM index
+    (`cram::fs::read_associated_index`).
+
+### Changed
+
+  * cram: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+  * cram: Update to lzma-rust2 0.21.0.
+
+  * cram/crai/async: Move `read` and `write` to `fs` module.
+
+### Deprecated
+
+  * cram/crai/async: Deprecate `crai::r#async::read` and
+    `crai::r#async::write`.
+
+    Use `crai::r#async::fs::read` and `crai::r#async::fs::write`, respectively,
+    instead.
+
+### Fixed
+
+  * cram/codecs/rans_4x8/encode: Track whether previous symbol was written in
+    frequency writer.
+
+    An RLE context was unintentionally always created for the `0x01` symbol, if
+    it was part of the alphabet.
+
+  * cram/codecs/rans_4x8/encode: Calculate remainder for RLE length if the last
+    context is `0xff` in frequency writer.
+
+  * cram/codecs/rans_nx16/encode: Track whether previous symbol was written in
+    alphabet writer.
+
+  * cram/codecs/rans_nx16/encode: Calculate remainder for RLE length if the
+    last context is `0xff` in alphabet writer.
+
+  * cram/io/reader/query: Include reference sequence ID when filtering records
+    ([#396]).
+
+  * cram/io/reader/query: Include region interval when filtering containers
+    ([#396]).
+
+  * cram/io/reader/container/slice/records: Match missing name without
+    terminator.
+
+    The terminator is removed by the byte array data series decoder.
+  
+  * cram/io/writer/container/slice/records: Remove duplicate terminator from
+    missing name.
+
+    This is added by the byte array data series encoder instead.
+
+[#396]: https://github.com/zaeleus/noodles/pull/396
+
+## 0.99.0 - 2026-08-21
+
+### Changed
+
+  * cram: Update to lzma-rust2 0.19.0.
+
+## 0.98.0 - 2026-08-03
+
+### Changed
+
+  * cram: Sync dependencies.
+
+## 0.97.0 - 2026-07-31
+
+### Changed
+
+  * cram: Update to lzma-rust2 0.18.0.
+
+### Fixed
+
+  * cram/crai/io/reader: Clear line buffer when reading index ([#408]).
+
+[#408]: https://github.com/zaeleus/noodles/pull/408
+
 ## 0.96.0 - 2026-07-24
 
 ### Changed
@@ -12,7 +94,7 @@
 
   * cram/io: Add buffered reader (`cram::io::BufReader`) ([#398]).
 
-    This is similiar to using the `Records` iterator but calling
+    This is similar to using the `Records` iterator but calling
     `Reader::read_record_buf` for each record instead.
 
 [#398]: https://github.com/zaeleus/noodles/issues/398
@@ -110,6 +192,8 @@
 ### Changed
 
   * cram: Raise minimum supported Rust version (MSRV) to 1.88.0.
+
+  * cram: Update to lzma-rust2 0.16.1.
 
   * cram/file_definition: Return an array reference (`&[u8; 20]`) from
     `FileDefinition::file_id`.

@@ -12,7 +12,7 @@ use crate::{io::writer::record::MISSING, variant::record::info::field::Value};
 /// An error returns when an info field fails to write.
 #[derive(Debug)]
 pub enum WriteError {
-    // I/O error.
+    /// I/O error.
     Io(io::Error),
     /// The key is invalid.
     InvalidKey(key::WriteError),

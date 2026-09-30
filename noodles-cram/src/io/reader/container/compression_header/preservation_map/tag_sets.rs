@@ -22,17 +22,21 @@ fn read_tag_sets_inner(src: &mut &[u8]) -> io::Result<TagSets> {
 
         *src = &rest[1..];
 
-        let mut line = Vec::new();
+        let (chunks, []) = buf.as_chunks() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid tag set value",
+            ));
+        };
 
-        for chunk in buf.chunks_exact(3) {
-            let (t0, t1, ty) = (chunk[0], chunk[1], chunk[2]);
-
-            let tag = Tag::new(t0, t1);
-            let ty = decode_type(ty)?;
-            let key = Key::new(tag, ty);
-
-            line.push(key);
-        }
+        let line = chunks
+            .iter()
+            .map(|[b0, b1, b2]| {
+                let tag = Tag::new(*b0, *b1);
+                let ty = decode_type(*b2)?;
+                Ok(Key::new(tag, ty))
+            })
+            .collect::<io::Result<_>>()?;
 
         sets.push(line);
     }
@@ -60,6 +64,25 @@ fn decode_type(n: u8) -> io::Result<Type> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_read_tag_sets_inner() -> io::Result<()> {
+        assert!(read_tag_sets_inner(&mut &[][..])?.is_empty());
+
+        let x1 = Key::new(Tag::new(b'X', b'1'), Type::UInt8);
+        let bc = Key::new(Tag::new(b'B', b'C'), Type::String);
+        let sa = Key::new(Tag::new(b'S', b'A'), Type::String);
+
+        assert_eq!(read_tag_sets_inner(&mut &b"X1C\x00"[..])?, vec![vec![x1]]);
+
+        // _CRAM format specification (version 3.1)_ (2025-06-04) § 8.4.3 "Tag encodings"
+        assert_eq!(
+            read_tag_sets_inner(&mut &b"X1CBCZSAZ\x00X1CBCZ\x00"[..])?,
+            vec![vec![x1, bc, sa], vec![x1, bc]]
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn test_decode_type() -> io::Result<()> {

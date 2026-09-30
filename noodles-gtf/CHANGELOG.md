@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+  * gtf: Raise minimum supported Rust version (MSRV) to 1.91.0.
+
+## 0.57.0 - 2026-08-21
+
+### Changed
+
+  * gtf: Sync dependencies.
+
+## 0.56.0 - 2026-08-03
+
+### Changed
+
+  * gtf: Sync dependencies.
+
+## 0.55.0 - 2026-07-31
+
+### Changed
+
+  * gtf: Sync dependencies.
+
 ## 0.54.0 - 2026-07-24
 
 ### Changed
