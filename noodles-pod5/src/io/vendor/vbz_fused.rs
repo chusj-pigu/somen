@@ -202,3 +202,18 @@ fn encode_decode_control_bytes_and_truncation() {
         Err(DecodeError::DataTruncated { index: 8 })
     ));
 }
+
+#[test]
+fn decode_known_vbz_bytes() {
+    // Four one-byte zigzag deltas: 0, -1, 2, and 127.
+    let mut samples = Vec::new();
+    decode_into(&[0, 0, 1, 4, 254], 4, &mut samples).unwrap();
+    assert_eq!(samples, [0, -1, 1, 128]);
+    assert_eq!(encode(&samples), [0, 0, 1, 4, 254]);
+
+    // A two-byte zigzag delta of 128.
+    samples.clear();
+    decode_into(&[1, 0, 1], 1, &mut samples).unwrap();
+    assert_eq!(samples, [128]);
+    assert_eq!(encode(&samples), [1, 0, 1]);
+}
