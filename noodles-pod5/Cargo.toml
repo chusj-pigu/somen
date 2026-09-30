@@ -1,14 +1,14 @@
 [package]
-name = "noodles-pod5"
+name = "somen-pod5"
 version = "0.1.0"
 authors = ["Selik Wilhelm-Landry <selik.wilhelm.landry@gmail.com>"]
 license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "POD5 format Reader and Writer"
-homepage = "https://github.com/zaeleus/noodles"
-repository = "https://github.com/zaeleus/noodles"
-documentation = "https://docs.rs/noodles-pod5"
+homepage = "https://github.com/chusj-pigu/somen"
+repository = "https://github.com/chusj-pigu/somen"
+documentation = "https://docs.rs/somen-pod5"
 categories = ["parser-implementations", "science::bioinformatics"]
 
 [dependencies]

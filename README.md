@@ -1,36 +1,36 @@
-# noodles
+# somen
 
-[![crates.io](https://img.shields.io/crates/v/noodles.svg)](https://crates.io/crates/noodles)
-[![Docs.rs](https://docs.rs/noodles/badge.svg)](https://docs.rs/noodles)
-[![CI status](https://github.com/zaeleus/noodles/actions/workflows/ci.yml/badge.svg)](https://github.com/zaeleus/noodles/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/somen.svg)](https://crates.io/crates/somen)
+[![Docs.rs](https://docs.rs/somen/badge.svg)](https://docs.rs/somen)
+[![CI status](https://github.com/chusj-pigu/somen/actions/workflows/ci.yml/badge.svg)](https://github.com/chusj-pigu/somen/actions/workflows/ci.yml)
 
-**noodles** attempts to provide specification-compliant (when applicable)
+**somen** attempts to provide specification-compliant (when applicable)
 implementations of libraries for handling various bioinformatics file formats.
 It currently supports BAM 1.6, BCF 2.2, BED, BGZF, CRAM 3.0/3.1, CSI, FASTA,
 FASTQ, GFF3, GTF 2.2, htsget 1.3, POD5, refget 2.0, SAM 1.6, tabix, and VCF 4.3/4.4.
 
 ## Usage
 
-noodles is published on [crates.io]. Early versions can be used in projects,
-but keep in mind that the API is still considered experimental.
+somen's API is still considered experimental.
 
-noodles is split into multiple crates by file format. For convenience, a
-top-level meta crate named `noodles` can be added to your project's dependency
-list; and formats, listed as [features]. For example, to work with the BAM
-format, add the `noodles` crate and enable the `bam` feature.
+somen includes parsers for multiple file formats. For convenience, the
+top-level `somen` crate exposes the existing noodles parser crates as
+[features]. For example, to work with the BAM format, enable the `bam` feature.
 
 ```sh
-cargo add noodles --features bam
+cargo add somen --features bam
 ```
 
 Each enabled feature can then be imported by its re-exported name, e.g.,
 
 ```rust
-use noodles::bam;
+use somen::bam;
 ```
 
 [crates.io]: https://crates.io/
 [features]: https://doc.rust-lang.org/cargo/reference/features.html
+
+POD5 is available separately as `somen-pod5` and is not a `somen` feature.
 
 ### Feature flags
 

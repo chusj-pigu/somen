@@ -1,4 +1,4 @@
-//! **noodles-pod5** handles the reading and writing of the POD5 format.
+//! **somen-pod5** handles the reading and writing of the POD5 format.
 //!
 //! POD5 is a format used to store raw electrical signal data from DNA and RNA sequencing.
 //! Developed by *Oxford Nanopore Technologies*, it is produced by their devices
@@ -15,4 +15,3 @@ compile_error!("This crate only supports Windows and Unix-based operating system
 pub mod io;
 pub mod file;
 pub mod record;
-

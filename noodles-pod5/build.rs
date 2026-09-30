@@ -1,4 +1,4 @@
-//! Generates the FlatBuffers bindings used by noodles-pod5.
+//! Generates the FlatBuffers bindings used by somen-pod5.
 use std::process::Command;
 
 fn main() {

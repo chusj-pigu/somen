@@ -1,4 +1,4 @@
-//! **noodles** attempts to provide specification-compliant (when applicable) implementations of
+//! **somen** attempts to provide specification-compliant (when applicable) implementations of
 //! libraries for handling various bioinformatics file formats. It currently supports BAM 1.6, BCF
 //! 2.2, BED, BGZF, CRAM 3.0/3.1, CSI, FASTA, FASTQ, GFF3, GTF 2.2, htsget 1.3, refget 2.0, SAM
 //! 1.6, tabix, and VCF 4.3/4.4.
@@ -50,10 +50,6 @@ pub use noodles_gtf as gtf;
 #[cfg(feature = "htsget")]
 #[doc(inline)]
 pub use noodles_htsget as htsget;
-
-#[cfg(feature = "pod5")]
-#[doc(inline)]
-pub use noodles_pod5 as pod5;
 
 #[cfg(feature = "refget")]
 #[doc(inline)]
