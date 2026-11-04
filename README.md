@@ -31,6 +31,20 @@ use somen::bam;
 [features]: https://doc.rust-lang.org/cargo/reference/features.html
 
 POD5 is available separately as `somen-pod5` and is not a `somen` feature.
+Its implementation is incomplete: some read and signal codec operations are
+not yet implemented. Do not rely on it for production POD5 processing yet.
+
+### Building the workspace
+
+Building `somen-pod5` (including when building the whole workspace) requires
+the FlatBuffers compiler `flatc` on `PATH`. The supported compiler version is
+25.12.19, matching the crate's `flatbuffers` dependency. Install that version
+from the [FlatBuffers releases], then check `flatc --version` before running
+`cargo check --workspace`. The Jbox development image provisions and verifies
+this version automatically; see `.jbox/Dockerfile` for an example on Linux
+x86-64. The CI workflow installs the same compiler for its lint and test jobs.
+
+[FlatBuffers releases]: https://github.com/google/flatbuffers/releases/tag/v25.12.19
 
 ### Feature flags
 
