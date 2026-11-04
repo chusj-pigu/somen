@@ -77,11 +77,15 @@ impl<M: ConcurrencyMode> BatchRegistry<M> {
         let read_table = pod5.read_table().get_ipc_reader();
         let signal_table = pod5.signal_table().get_ipc_reader();
         
-        for index in pod5.hint_lookahead().initial_batch_indexes() {
+        for index in pod5.hint_lookahead().bounded_initial_batch_indexes(run_info_table.num_batches()) {
             let range = run_info_table.get_batch_range(index);
             pod5.mmap().will_need(range);
+        }
+        for index in pod5.hint_lookahead().bounded_initial_batch_indexes(read_table.num_batches()) {
             let range = read_table.get_batch_range(index);
             pod5.mmap().will_need(range);
+        }
+        for index in pod5.hint_lookahead().bounded_initial_batch_indexes(signal_table.num_batches()) {
             let range = signal_table.get_batch_range(index);
             pod5.mmap().will_need(range);
         }
@@ -107,8 +111,7 @@ impl<M: ConcurrencyMode> BatchRegistry<M> {
             None => tracker.set(batch_provider.get_batch(index)),
         };
         let (batch_ref, capacity) = result?;
-        if self.pod5.hint_threshold().hit_by(capacity) {
-            let next_index = self.pod5.hint_lookahead().next_batch_index(index);
+        if self.pod5.hint_threshold().hit_by(capacity) && let Some(next_index) = self.pod5.hint_lookahead().checked_next_batch_index(index, batch_provider.num_batches()) {
             let range = batch_provider.get_batch_byte_range(next_index);
             self.pod5.mmap().will_need(range);
         }

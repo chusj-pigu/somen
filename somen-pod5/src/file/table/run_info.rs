@@ -105,6 +105,7 @@ impl<M: ConcurrencyMode> RunInfoTable<M> {
 }
 
 impl<M: ConcurrencyMode> BatchProvider<M, RunInfoColumns> for RunInfoTable<M> {
+    fn num_batches(&self) -> usize { self.ipc_reader.num_batches() }
     fn get_batch(&self, batch_index: BatchIndex) -> BatchResult<M, RunInfoColumns> {
         let batch = match self.ipc_reader.get_batch(batch_index) {
             Ok(batch) => batch,

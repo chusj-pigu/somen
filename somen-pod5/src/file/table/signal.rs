@@ -106,6 +106,7 @@ impl<M: ConcurrencyMode> SignalTable<M> {
 }
 
 impl<M: ConcurrencyMode> BatchProvider<M, SignalColumns> for SignalTable<M> {
+    fn num_batches(&self) -> usize { self.ipc_reader.num_batches() }
     fn get_batch(&self, batch_index: BatchIndex) -> BatchResult<M, SignalColumns> {
         let batch = match self.ipc_reader.get_batch(batch_index) {
             Ok(batch) => batch,

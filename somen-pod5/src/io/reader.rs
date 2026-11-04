@@ -960,6 +960,15 @@ impl HintLookahead {
         (0..self.0).map(|i| i.into()).collect()
     }
 
+    pub(crate) fn bounded_initial_batch_indexes(&self, count: usize) -> impl Iterator<Item = BatchIndex> {
+        (0..self.0).take(count).map(BatchIndex::new)
+    }
+
+    pub(crate) fn checked_next_batch_index(&self, index: BatchIndex, count: usize) -> Option<BatchIndex> {
+        let next = index.value().checked_add(self.0)?;
+        (usize::try_from(next).ok()? < count).then(|| BatchIndex::new(next))
+    }
+
     /// todo
     pub fn next_batch_index(&self, batch_index: BatchIndex) -> BatchIndex {
         // Panic behavior used specifically because other limits, like
@@ -970,5 +979,29 @@ impl HintLookahead {
 }
 
 pub struct ReaderBuilder;
+
+#[cfg(test)]
+mod lookahead_tests {
+    use super::*;
+
+    #[test]
+    fn initial_prefetch_is_bounded_per_table() {
+        let lookahead = HintLookahead::new(u32::MAX).unwrap();
+        for count in [0, 1, 3] {
+            let indexes: Vec<_> = lookahead.bounded_initial_batch_indexes(count).map(|i| i.value()).collect();
+            assert_eq!(indexes, (0..count as u32).collect::<Vec<_>>());
+        }
+        let short = HintLookahead::new(2).unwrap();
+        assert_eq!(short.bounded_initial_batch_indexes(5).count(), 2);
+    }
+
+    #[test]
+    fn next_prefetch_checks_end_and_overflow() {
+        let lookahead = HintLookahead::new(2).unwrap();
+        assert_eq!(lookahead.checked_next_batch_index(BatchIndex::new(0), 3), Some(BatchIndex::new(2)));
+        assert_eq!(lookahead.checked_next_batch_index(BatchIndex::new(0), 2), None);
+        assert_eq!(lookahead.checked_next_batch_index(BatchIndex::new(u32::MAX), usize::MAX), None);
+    }
+}
 
 pub struct Reader;

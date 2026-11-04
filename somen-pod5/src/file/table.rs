@@ -92,6 +92,7 @@ impl From<SchemaError> for TableError {
 }
 
 pub(crate) trait BatchProvider<M: ConcurrencyMode, C: BatchColumns> {
+    fn num_batches(&self) -> usize;
     fn get_batch(&self, batch_index: BatchIndex) -> BatchResult<M, C>;
     fn get_batch_byte_range(&self, batch_index: BatchIndex) -> ByteRange;
 }
