@@ -631,6 +631,9 @@ pub(crate) use self::internal::{
     Pod5Context,
 };
 
+#[cfg(feature = "backend")]
+pub(crate) use self::internal::{Pod5Context, Pod5ContextHandle, RefCounted};
+
 
 #[must_use]
 #[repr(transparent)]

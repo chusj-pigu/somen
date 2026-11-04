@@ -29,7 +29,7 @@ pub use self::{
 #[cfg(feature = "backend")]
 pub mod backend {
     pub use self::super::{
-        pod5::backend::*,
+        pod5::Pod5Contract,
         run::backend::*,
     };
 }

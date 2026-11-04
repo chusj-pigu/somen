@@ -47,7 +47,7 @@ pub(crate) mod internal {
 
 #[cfg(feature = "backend")]
 pub mod backend {
-    pub use self::internal::*;
+    pub use super::internal::*;
 }
 
 
