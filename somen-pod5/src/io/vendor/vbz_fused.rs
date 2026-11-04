@@ -52,6 +52,8 @@ pub enum DecodeError {
     /// signal forward-incompatible changes rather than silently
     /// misinterpreting the payload.
     UnsupportedVersion { version: u8 },
+    /// The stream contains unused bytes after the requested samples.
+    TrailingData,
 }
 
 impl Display for DecodeError {
@@ -60,6 +62,7 @@ impl Display for DecodeError {
             DecodeError::DataTruncated { index } => write!(f, "data truncated: expected more bytes at value {index}"),
             DecodeError::ControlStreamTooShort { need, have } => write!(f, "control stream shorter than expected: need {need} bytes, have {have}"),
             DecodeError::UnsupportedVersion { version } => write!(f, "unsupported format version: {version}"),
+            DecodeError::TrailingData => write!(f, "trailing signal data"),
         }
     }
 }
@@ -72,9 +75,6 @@ pub fn decode_into(
     n: usize,
     out: &mut Vec<i16>,
 ) -> Result<(), DecodeError> {
-    if n == 0 {
-        return Ok(());
-    }
     let ctrl_len = n.div_ceil(8);
     if data.len() < ctrl_len {
         return Err(DecodeError::ControlStreamTooShort {
@@ -108,6 +108,9 @@ pub fn decode_into(
         let delta = ((raw >> 1) ^ (0u16.wrapping_sub(raw & 1))) as i16;
         acc = acc.wrapping_add(delta);
         out.push(acc);
+    }
+    if data_pos != data_bytes.len() {
+        return Err(DecodeError::TrailingData);
     }
     Ok(())
 }

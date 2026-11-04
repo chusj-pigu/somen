@@ -33,6 +33,8 @@ use somen::bam;
 POD5 is available separately as `somen-pod5` and is not a `somen` feature.
 Its implementation is incomplete: some read and signal codec operations are
 not yet implemented. Do not rely on it for production POD5 processing yet.
+The `somen-pod5` `simd-*` feature flags currently do not enable SIMD; signal
+codec operations use the scalar implementation.
 
 ### Building the workspace
 

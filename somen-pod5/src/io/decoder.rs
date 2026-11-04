@@ -28,7 +28,7 @@ use crate::{
     },
     io::{
         reader::ConcurrencyMode,
-        vendor::decode,
+        vendor::decode_with_count,
     },
 };
 use crate::io::reader::RefCounted;
@@ -205,13 +205,13 @@ impl<M: ConcurrencyMode> Worker<M> {
     fn decompress(task: &BoxRef<Task<M>>) -> SignalData {
         match task.raw_signal() {
             Ok(LargeData::VBZ(bytes)) => {
-                let data = match decode(bytes).map_err(SignalError::DecompressionError) {
-                    Ok(data) => data,
+                let len = match task.samples() {
+                    Ok(len) => len as usize,
                     Err(e) => return e.into(),
                 };
 
-                let len = match task.samples() {
-                    Ok(len) => len as usize,
+                let data = match decode_with_count(bytes, len).map_err(SignalError::DecompressionError) {
+                    Ok(data) => data,
                     Err(e) => return e.into(),
                 };
 
