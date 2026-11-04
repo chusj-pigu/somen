@@ -46,3 +46,5 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/flatc" --version
       - run: cargo test --all-features
+      - run: cargo test -p somen-pod5 --no-default-features
+      - run: cargo test -p somen-pod5 --no-default-features --features backend

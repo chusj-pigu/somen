@@ -26,13 +26,7 @@ fn backend_exports_are_usable_by_external_generic_code() {
         io::reader::{
             Atomic, BatchRef, BatchRefOf, ConcurrencyMode, GuardBatchRef, Local, RcBatchRef,
         },
-        record::batch::{
-            backend::{
-                ReadBatch as ReadBatchContract, RunInfoBatch as RunInfoBatchContract,
-                SignalBatch as SignalBatchContract,
-            },
-            columns::ReadColumns,
-        },
+        record::batch::columns::ReadColumns,
     };
 
     fn pod5<M: ConcurrencyMode, T: Pod5Contract<M>>() {}
@@ -41,14 +35,6 @@ fn backend_exports_are_usable_by_external_generic_code() {
         R: ReadTableContract<M>,
         I: RunInfoTableContract<M>,
         S: SignalTableContract<M>,
-    >() {
-    }
-    #[allow(dead_code)]
-    fn batches<
-        M: ConcurrencyMode,
-        R: ReadBatchContract<M>,
-        I: RunInfoBatchContract<M>,
-        S: SignalBatchContract<M>,
     >() {
     }
     fn batch_ref<T: BatchRef<ReadColumns>>() {}
