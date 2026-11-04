@@ -364,7 +364,6 @@ impl IPCReader {
     /// todo
     pub(crate) fn get_batch_index_lookup(&self) -> Result<BatchIndexLookup, IPCReaderError> {
         let mut vec = Vec::with_capacity(self.total_blocks);
-        let mut total_rows = 0u64;
         for batch_index in 0..self.total_blocks {
             let block = &self.blocks[batch_index];
             let (start, metadata_len, _) = block_range(block, self.buffer.len())?;
@@ -373,15 +372,10 @@ impl IPCReader {
                 IPCReaderError::ParseError("expected record batch header".to_string()))?;
             let rows = u64::try_from(batch.length()).map_err(|_|
                 IPCReaderError::ParseError("negative record batch length".to_string()))?;
-            // BatchIndexLookup cannot currently represent empty batches safely.
-            if rows == 0 {
-                return Err(IPCReaderError::ParseError("empty record batches are not supported".to_string()));
-            }
-            total_rows = total_rows.checked_add(rows).ok_or_else(||
-                IPCReaderError::ParseError("record batch row count overflow".to_string()))?;
             vec.push(RowCount::new(rows));
         }
-        Ok(BatchIndexLookup::new(&vec))
+        BatchIndexLookup::try_new(&vec).ok_or_else(||
+            IPCReaderError::ParseError("record batch row count overflow".to_string()))
     }
 
     /// Return the [`RecordBatch`] at `batch_index`.
@@ -461,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_batch_after_nonempty_batch() {
+    fn supports_empty_batch_after_nonempty_batch() {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(Int32Array::from(vec![1, 2]))]).unwrap();
         let empty = RecordBatch::try_new(schema.clone(), vec![Arc::new(Int32Array::from(Vec::<i32>::new()))]).unwrap();
@@ -478,6 +472,9 @@ mod tests {
         let blocks: Vec<_> = footer.recordBatches().unwrap().iter().copied().collect();
         let decoder = FileDecoder::new(schema, footer.version());
         let reader = IPCReader { total_blocks: blocks.len(), blocks, buffer: Buffer::from(bytes), decoder };
-        assert!(reader.get_batch_index_lookup().is_err());
+        let lookup = reader.get_batch_index_lookup().unwrap();
+        assert_eq!(lookup.search(crate::file::FileRowIndex::new(1)), Some(BatchIndex::new(0)));
+        assert_eq!(lookup.search(crate::file::FileRowIndex::new(2)), None);
+        assert_eq!(reader.get_batch(BatchIndex::new(1)).unwrap(), empty);
     }
 }

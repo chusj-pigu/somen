@@ -42,29 +42,34 @@ pub struct BatchIndexLookup {
 
 impl BatchIndexLookup {
     /// Returns a new `BatchIndexLookup`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the total number of rows exceeds `u64::MAX`. Use
+    /// [`Self::try_new`] when lengths come from untrusted input.
     pub fn new(batch_lengths: &[RowCount]) -> Self {
+        Self::try_new(batch_lengths).expect("batch row count overflow")
+    }
+
+    /// Creates a lookup, returning `None` if the total row count overflows.
+    pub fn try_new(batch_lengths: &[RowCount]) -> Option<Self> {
         let mut row_indexes =  Vec::with_capacity(batch_lengths.len());
         let mut total: u64 = 0;
         for row_count in batch_lengths {
-            total += row_count.value() as u64;
-            // Note: storing total - 1 because binary_search is upper bound inclusive.
-            // ex: with [2,4], inputing 0, 1 or 2 returns 0 while 3 or 4 return 1.
-            row_indexes.push(total - 1);
+            total = total.checked_add(row_count.value())?;
+            row_indexes.push(total);
         }
-        Self { row_indexes }
+        Some(Self { row_indexes })
     }
 
     /// Returns the `BatchIndex` in which the [`FileRowIndex`] fits,
     /// or None if the `FileRowIndex` doesn't fit in the bounds of any batch.
     pub fn search(&self, index: FileRowIndex) -> Option<BatchIndex> {
-        let indexes = &self.row_indexes;
-        let value = &index.value();
-        if value > indexes.last()? {
+        let batch_index = self.row_indexes.partition_point(|&end| end <= index.value());
+        if batch_index == self.row_indexes.len() {
             return None;
         }
-        let result = indexes.binary_search(value);
-        let batch_index = result.unwrap_or_else(|batch_index| batch_index);
-        Some(BatchIndex::new(batch_index as u32))
+        Some(BatchIndex::new(u32::try_from(batch_index).ok()?))
     }
 
     /// Returns the starting [`FileRowIndex`] and total [`RowCount`] of a batch.
@@ -75,15 +80,9 @@ impl BatchIndexLookup {
         if self.row_indexes.len() <= index {
             return None;
         }
-        let start: FileRowIndex;
-        if index == 0 {
-            start = FileRowIndex::new(0)
-        } else {
-            start = {self.row_indexes[index - 1] + 1}.into();
-        }
-        let end: FileRowIndex = {self.row_indexes[index] + 1}.into();
-        let end = end.count_rows(start)?;
-        Some((start.into(),end))
+        let start = if index == 0 { 0 } else { self.row_indexes[index - 1] };
+        let end = self.row_indexes[index];
+        Some((FileRowIndex::new(start), RowCount::new(end - start)))
     }
 }
 
@@ -119,16 +118,19 @@ impl<M: ConcurrencyMode> BatchIndexCache<M> {
     /// immediate subsequent batch before resorting to a global binary search.
     pub fn find_batch_index(&mut self, index: FileRowIndex) -> Option<BatchIndex> {
         if let (Some(batch), Some(start), Some(length)) = (self.batch, self.start, self.length) {
-            if index.in_range(start, length)? {
+            if index.value().checked_sub(start.value()).is_some_and(|local| local < length.value()) {
                 return Some(batch);
             }
-            let batch = BatchIndex::new(batch.value() + 1);
-            let (start, length) = self.source.get(batch)?;
-            if index.in_range(start, length)? {
-                self.batch = Some(batch);
-                self.start = Some(start);
-                self.length = Some(length);
-                return Some(batch);
+            if let Some(next) = batch.value().checked_add(1) {
+                let batch = BatchIndex::new(next);
+                if let Some((start, length)) = self.source.get(batch) {
+                    if index.value().checked_sub(start.value()).is_some_and(|local| local < length.value()) {
+                        self.batch = Some(batch);
+                        self.start = Some(start);
+                        self.length = Some(length);
+                        return Some(batch);
+                    }
+                }
             }
         }
         let batch = self.source.search(index)?;
@@ -194,6 +196,33 @@ impl TableRange {
 
 
 
-/*
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::reader::Local;
+    use std::rc::Rc;
 
-*/
+    #[test]
+    fn lookup_skips_empty_batches_and_handles_boundaries() {
+        let lookup = BatchIndexLookup::new(&[0.into(), 2.into(), 0.into(), 3.into(), 0.into()]);
+        for (row, batch) in [(0, 1), (1, 1), (2, 3), (4, 3)] {
+            assert_eq!(lookup.search(FileRowIndex::new(row)), Some(BatchIndex::new(batch)));
+        }
+        assert_eq!(lookup.search(FileRowIndex::new(5)), None);
+        assert_eq!(lookup.get(BatchIndex::new(0)), Some((FileRowIndex::new(0), RowCount::new(0))));
+        assert_eq!(lookup.get(BatchIndex::new(2)), Some((FileRowIndex::new(2), RowCount::new(0))));
+        assert_eq!(lookup.get(BatchIndex::new(3)), Some((FileRowIndex::new(2), RowCount::new(3))));
+        assert_eq!(lookup.get(BatchIndex::new(5)), None);
+        assert_eq!(BatchIndexLookup::new(&[0.into()]).search(FileRowIndex::new(0)), None);
+        assert!(BatchIndexLookup::try_new(&[u64::MAX.into(), 1.into()]).is_none());
+    }
+
+    #[test]
+    fn cache_handles_backwards_and_empty_batch_jumps() {
+        let lookup = Rc::new(BatchIndexLookup::new(&[2.into(), 0.into(), 3.into()]));
+        let mut cache = BatchIndexCache::<Local>::new(lookup);
+        for (row, batch) in [(0, Some(0)), (2, Some(2)), (4, Some(2)), (0, Some(0)), (5, None)] {
+            assert_eq!(cache.find_batch_index(FileRowIndex::new(row)), batch.map(BatchIndex::new));
+        }
+    }
+}
