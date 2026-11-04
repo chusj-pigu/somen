@@ -43,7 +43,7 @@ impl FileRowIndex {
     /// Returns the [`RowCount`] for this `RowIndex` based on the start
     /// `RowIndex` or None if it's not a valid `RowCount`.
     pub fn count_rows(&self, start: Self) -> Option<RowCount> {
-        let difference = self.value() - start.value();
+        let difference = self.value().checked_sub(start.value())?;
         let value = difference.try_into().ok()?;
         Some(RowCount::new(value))
     }
@@ -51,7 +51,7 @@ impl FileRowIndex {
     /// Returns the [`BatchRowIndex`] for this `RowIndex` based on the start
     /// `RowIndex` or None if it's not a valid `BatchRowIndex`.
     pub fn local(&self, start: Self) -> Option<BatchRowIndex> {
-        let difference = self.value() - start.value();
+        let difference = self.value().checked_sub(start.value())?;
         let value = difference.try_into().ok()?;
         Some(BatchRowIndex::new(value))
     }
@@ -157,3 +157,21 @@ impl Display for IndexOutOfBounds {
 }
 
 impl Error for IndexOutOfBounds {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn row_offsets_reject_underflow_and_oversized_local_indexes() {
+        let start = FileRowIndex::new(10);
+        let before = FileRowIndex::new(9);
+        assert_eq!(before.count_rows(start), None);
+        assert_eq!(before.local(start), None);
+        assert_eq!(before.in_range(start, RowCount::new(4)), None);
+        assert_eq!(start.count_rows(start), Some(RowCount::new(0)));
+        assert_eq!(FileRowIndex::new(13).local(start), Some(BatchRowIndex::new(3)));
+        assert_eq!(FileRowIndex::new(14).in_range(start, RowCount::new(4)), Some(false));
+        assert_eq!(FileRowIndex::new(u64::from(u32::MAX) + 11).local(start), None);
+    }
+}
