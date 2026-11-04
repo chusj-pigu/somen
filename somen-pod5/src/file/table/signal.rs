@@ -141,6 +141,9 @@ impl<M: ConcurrencyMode> SignalTableContract<M> for SignalTable<M> {
     }
 
     fn get_batch(&self, batch_index: BatchIndex) -> BatchResult<M, SignalColumns> {
+        if usize::from(batch_index) >= self.ipc_reader.num_batches() {
+            return <Self as BatchProvider<M, SignalColumns>>::get_batch(self, batch_index);
+        }
         let byte_range = self.ipc_reader.get_batch_range(batch_index);
         self.mmap.will_need(byte_range);
         <Self as BatchProvider<M, SignalColumns>>::get_batch(self, batch_index)
