@@ -772,6 +772,125 @@ mod tests {
         }
     }
 
+    /// Parses one fixture's three embedded tables and returns each table's
+    /// total row count across all of its batches.
+    fn parse_fixture(prefix: &str, read: &[u8], signal: &[u8], run_info: &[u8]) -> [u32; 3] {
+        let tables: [&[u8]; 3] = [read, signal, run_info];
+        let mut counts = [0u32; 3];
+        for (index, bytes) in tables.into_iter().enumerate() {
+            let (reader, _, _) = IPCReader::new(Buffer::from(bytes.to_vec()))
+                .unwrap_or_else(|e| panic!("{prefix}: table {index} failed to parse: {e}"));
+            let total: u32 = (0..reader.num_batches())
+                .map(|b| {
+                    reader
+                        .get_batch(BatchIndex::new(b as u32))
+                        .unwrap_or_else(|e| panic!("{prefix}: table {index} batch {b}: {e}"))
+                        .num_rows() as u32
+                })
+                .sum();
+            counts[index] = total;
+        }
+        counts
+    }
+
+    #[test]
+    fn reads_minimum_schema_fixture_set() {
+        // Real POD5 files at each schema version (v0..v6), re-encoded from
+        // the same original run, subset to 2 reads each.
+        macro_rules! version_fixture {
+            ($v:literal) => {
+                parse_fixture(
+                    concat!("version-v", $v),
+                    include_bytes!(concat!("../../tests/fixtures/version-v", $v, "-read.arrow")),
+                    include_bytes!(concat!("../../tests/fixtures/version-v", $v, "-signal.arrow")),
+                    include_bytes!(concat!("../../tests/fixtures/version-v", $v, "-run_info.arrow")),
+                )
+            };
+        }
+        for counts in [
+            version_fixture!(0),
+            version_fixture!(1),
+            version_fixture!(2),
+            version_fixture!(3),
+            version_fixture!(4),
+            version_fixture!(5),
+            version_fixture!(6),
+        ] {
+            // Real reads can have their signal chunked across more than one
+            // signal-table row, so only the read/run_info counts are exact.
+            assert_eq!([counts[0], counts[2]], [2, 1]);
+            assert!(counts[1] >= 2);
+        }
+
+        // 2 synthetic reads with uncompressed (non-VBZ) signal.
+        assert_eq!(
+            parse_fixture(
+                "raw-signal",
+                include_bytes!("../../tests/fixtures/raw-signal-read.arrow"),
+                include_bytes!("../../tests/fixtures/raw-signal-signal.arrow"),
+                include_bytes!("../../tests/fixtures/raw-signal-run_info.arrow"),
+            ),
+            [2, 2, 1]
+        );
+
+        // 3 synthetic reads with deliberately distinct end_reason/pore_type
+        // dictionary values.
+        assert_eq!(
+            parse_fixture(
+                "dictionary-variety",
+                include_bytes!("../../tests/fixtures/dictionary-variety-read.arrow"),
+                include_bytes!("../../tests/fixtures/dictionary-variety-signal.arrow"),
+                include_bytes!("../../tests/fixtures/dictionary-variety-run_info.arrow"),
+            ),
+            [3, 3, 1]
+        );
+
+        // 3 real reads subset from nf-core's nanoseq CI fixture -- a file
+        // this project never wrote. Real signal can be chunked across more
+        // than one signal-table row, so only read/run_info counts are exact.
+        let real = parse_fixture(
+            "real",
+            include_bytes!("../../tests/fixtures/real-read.arrow"),
+            include_bytes!("../../tests/fixtures/real-signal.arrow"),
+            include_bytes!("../../tests/fixtures/real-run_info.arrow"),
+        );
+        assert_eq!([real[0], real[2]], [3, 1]);
+        assert!(real[1] >= 3);
+
+        // 2 real runs (2 reads each) merged, so the run_info table has 2
+        // distinct rows and reads reference two different ones.
+        let multi_run_info = parse_fixture(
+            "multi-run-info",
+            include_bytes!("../../tests/fixtures/multi-run-info-read.arrow"),
+            include_bytes!("../../tests/fixtures/multi-run-info-signal.arrow"),
+            include_bytes!("../../tests/fixtures/multi-run-info-run_info.arrow"),
+        );
+        assert_eq!([multi_run_info[0], multi_run_info[2]], [4, 2]);
+        assert!(multi_run_info[1] >= 4);
+    }
+
+    #[test]
+    fn reads_minimum_fixture_set_multi_batch_table() {
+        // 5 synthetic reads written with read/signal table batch size 2,
+        // forcing 3 Arrow record batches per table from a handful of reads.
+        let read = include_bytes!("../../tests/fixtures/multi-batch-read.arrow");
+        let signal = include_bytes!("../../tests/fixtures/multi-batch-signal.arrow");
+        let (reader, _, _) = IPCReader::new(Buffer::from(read.to_vec())).unwrap();
+        assert_eq!(reader.num_batches(), 3);
+        let lookup = reader.get_batch_index_lookup().unwrap();
+        assert_eq!(lookup.search(crate::file::FileRowIndex::new(0)), Some(BatchIndex::new(0)));
+        assert_eq!(lookup.search(crate::file::FileRowIndex::new(2)), Some(BatchIndex::new(1)));
+        assert_eq!(lookup.search(crate::file::FileRowIndex::new(4)), Some(BatchIndex::new(2)));
+        assert_eq!(lookup.search(crate::file::FileRowIndex::new(5)), None);
+        let total_rows: u32 = (0..reader.num_batches())
+            .map(|b| reader.get_batch(BatchIndex::new(b as u32)).unwrap().num_rows() as u32)
+            .sum();
+        assert_eq!(total_rows, 5);
+
+        let (signal_reader, _, _) = IPCReader::new(Buffer::from(signal.to_vec())).unwrap();
+        assert_eq!(signal_reader.num_batches(), 3);
+    }
+
     #[test]
     fn rejects_corrupt_synthetic_pod5_ipc_messages_and_trailers() {
         let original = include_bytes!("../../tests/fixtures/synthetic-read.arrow");
