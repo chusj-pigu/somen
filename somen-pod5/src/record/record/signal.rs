@@ -177,7 +177,7 @@ pub struct SignalRecord<R: ReferenceModel> {
 
 impl<R: ReferenceModel> SignalRecord<R> {
     /// todo
-    pub(super) fn new(
+    pub(crate) fn new(
         source: R::BatchRef<SignalColumns>,
         row: BatchRowIndex,
     ) -> Self {

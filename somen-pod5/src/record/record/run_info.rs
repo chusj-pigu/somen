@@ -250,7 +250,7 @@ pub struct RunInfoRecord<R: ReferenceModel> {
 
 impl<R: ReferenceModel> RunInfoRecord<R> {
     /// todo
-    pub(super) fn new(
+    pub(crate) fn new(
         source: R::BatchRef<RunInfoColumns>,
         row: BatchRowIndex,
         pod5_context_handle: R::Pod5ContextHandle,

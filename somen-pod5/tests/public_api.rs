@@ -26,7 +26,17 @@ fn backend_exports_are_usable_by_external_generic_code() {
         io::reader::{
             Atomic, BatchRef, BatchRefOf, ConcurrencyMode, GuardBatchRef, Local, RcBatchRef,
         },
-        record::batch::columns::ReadColumns,
+        record::batch::{
+            columns::ReadColumns,
+            ReadBatch, ConcurrentReadBatch,
+            RunInfoBatch, ConcurrentRunInfoBatch,
+            SignalBatch, ConcurrentSignalBatch,
+            backend::{
+                ReadBatch as ReadBatchContract,
+                RunInfoBatch as RunInfoBatchContract,
+                SignalBatch as SignalBatchContract,
+            },
+        },
     };
 
     fn pod5<M: ConcurrencyMode, T: Pod5Contract<M>>() {}
@@ -38,6 +48,9 @@ fn backend_exports_are_usable_by_external_generic_code() {
     >() {
     }
     fn batch_ref<T: BatchRef<ReadColumns>>() {}
+    fn read_batch<M: ConcurrencyMode, T: ReadBatchContract<M>>() {}
+    fn run_info_batch<M: ConcurrencyMode, T: RunInfoBatchContract<M>>() {}
+    fn signal_batch<M: ConcurrencyMode, T: SignalBatchContract<M>>() {}
     fn same_type<T>(_: std::marker::PhantomData<T>, _: std::marker::PhantomData<T>) {}
 
     pod5::<Local, Pod5<Local>>();
@@ -54,4 +67,14 @@ fn backend_exports_are_usable_by_external_generic_code() {
         std::marker::PhantomData::<BatchRefOf<Atomic, ReadColumns>>,
         std::marker::PhantomData::<GuardBatchRef<ReadColumns>>,
     );
+
+    // Regression test: the public `ReadBatch`/`RunInfoBatch`/`SignalBatch`
+    // aliases (and their concurrent variants) must implement the backend
+    // batch contract traits of the same name.
+    read_batch::<Local, ReadBatch>();
+    read_batch::<Atomic, ConcurrentReadBatch>();
+    run_info_batch::<Local, RunInfoBatch>();
+    run_info_batch::<Atomic, ConcurrentRunInfoBatch>();
+    signal_batch::<Local, SignalBatch>();
+    signal_batch::<Atomic, ConcurrentSignalBatch>();
 }

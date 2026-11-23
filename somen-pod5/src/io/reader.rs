@@ -133,7 +133,7 @@ mod internal {
     /// allocated in the heap.
     /// When the last `BatchRef` pointer to a given batch is destroyed,
     /// the batch stored in that allocation is also dropped.
-    pub trait BatchRef<C: BatchColumns>: Deref<Target = BatchCore<Self::ConcurrencyMode, C>> + sealed::BatchRefSeal {
+    pub trait BatchRef<C: BatchColumns>: Deref<Target = BatchCore<Self::ConcurrencyMode, C>> + sealed::BatchRefSeal + Clone {
         /// The [`ConcurrencyMode`] type associated with the `BatchRef`.
         type ConcurrencyMode: ConcurrencyMode;
 
@@ -208,6 +208,12 @@ mod internal {
     pub struct RcBatchRef<C: BatchColumns>(
         Rc<BatchResult<Local, C>>,
     );
+
+    impl<C: BatchColumns> Clone for RcBatchRef<C> {
+        fn clone(&self) -> Self {
+            Self(self.0.clone())
+        }
+    }
 
     impl<C: BatchColumns> Deref for RcBatchRef<C> {
         type Target = BatchCore<Local, C>;
@@ -303,6 +309,15 @@ mod internal {
         Guard<Option<Arc<BatchResult<Atomic, C>>>>,
     );
 
+    impl<C: BatchColumns> Clone for GuardBatchRef<C> {
+        fn clone(&self) -> Self {
+            // Freezes a clone of the currently observed `Arc` into a new
+            // `Guard`, independent of the live `ArcSwap`'s reclamation.
+            // This does not re-touch the swap itself.
+            Self(Guard::from_inner((*self.0).clone()))
+        }
+    }
+
     impl<C: BatchColumns> Deref for GuardBatchRef<C> {
         type Target = BatchCore<Atomic, C>;
 
@@ -360,6 +375,12 @@ mod internal {
     pub struct ArcBatchRef<C: BatchColumns>(
         Arc<BatchResult<Atomic, C>>,
     );
+
+    impl<C: BatchColumns> Clone for ArcBatchRef<C> {
+        fn clone(&self) -> Self {
+            Self(self.0.clone())
+        }
+    }
 
     impl<C: BatchColumns> ArcBatchRef<C> {
         /// todo
@@ -560,6 +581,7 @@ mod internal {
 
     pub type BatchRefOf<M: ConcurrencyMode, C: BatchColumns> = <M::InitialReferenceModel<C> as ReferenceModel>::BatchRef<C>;
     pub type ErrorRefOf<M: ConcurrencyMode, C: BatchColumns> = <<M::InitialReferenceModel<C> as ReferenceModel>::BatchRef<C> as InitialBatchRef<C>>::ErrorRef;
+    pub type Pod5ContextHandleOf<M: ConcurrencyMode, C: BatchColumns> = <M::InitialReferenceModel<C> as ReferenceModel>::Pod5ContextHandle;
 
     /// todo
     pub struct Local;
@@ -606,6 +628,7 @@ pub use self::internal::{
     ReferenceModel,
     BatchRefOf,
     ErrorRefOf,
+    Pod5ContextHandleOf,
 };
 
 #[cfg(not(feature = "backend"))]
@@ -626,6 +649,7 @@ pub(crate) use self::internal::{
     GuardModel,
     BatchRefOf,
     ErrorRefOf,
+    Pod5ContextHandleOf,
     Pod5ContextHandle,
     RefCounted,
     Pod5Context,

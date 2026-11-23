@@ -252,7 +252,7 @@ pub struct ReadRecord<R: ReferenceModel> {
 
 impl<R: ReferenceModel> ReadRecord<R> {
     /// todo
-    pub(super) fn new(
+    pub(crate) fn new(
         source: R::BatchRef<ReadColumns>,
         row: BatchRowIndex,
         pod5_context_handle: R::Pod5ContextHandle,
